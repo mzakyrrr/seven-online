@@ -1,18 +1,22 @@
 {
-  "name": "seven-online",
-  "version": "1.0.0",
+  "name": "seven-online-v2",
+  "version": "2.0.0",
   "private": true,
-  "description": "Online multiplayer Seven card game",
+  "description": "Seven Online with accounts, Elo ranking, leaderboard, and match history",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
   },
-  "dependencies": {
-    "express": "^4.21.2",
-    "socket.io": "^4.8.1"
-  },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.16.3",
+    "socket.io": "^4.8.1"
   }
 }
