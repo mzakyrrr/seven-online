@@ -1,99 +1,132 @@
-
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Seven Online</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Seven Ranked</title>
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="shell">
-    <header class="topbar">
-      <div>
-        <div class="eyebrow">ONLINE CARD GAME</div>
-        <h1>SEVEN</h1>
+<div class="shell">
+  <header class="topbar">
+    <div><div class="eyebrow">RANKED CARD GAME</div><h1>SEVEN</h1></div>
+    <div id="userTop" class="top-user hidden"></div>
+  </header>
+
+  <main>
+    <section id="authScreen" class="auth-grid">
+      <div class="hero">
+        <div class="eyebrow">WELCOME TO</div>
+        <h2>Seven Ranked</h2>
+        <p>Play strategically, protect your rating, and climb the leaderboard.</p>
       </div>
-      <div id="roomBadge" class="room-badge hidden"></div>
-    </header>
-
-    <main>
-      <section id="homeScreen" class="panel home">
-        <h2>Play Seven Online</h2>
-        <p>Create a private room or join your friends with a 5-character room code.</p>
-
-        <label>Your name</label>
-        <input id="nameInput" maxlength="18" placeholder="Player name" />
-
-        <div class="home-actions">
-          <button id="createBtn" class="btn primary">Create Room</button>
-          <div class="join-box">
-            <input id="roomInput" maxlength="5" placeholder="ROOM" />
-            <button id="joinBtn" class="btn secondary">Join Room</button>
-          </div>
+      <div class="panel auth-panel">
+        <div class="tabs">
+          <button id="loginTab" class="tab active">Login</button>
+          <button id="registerTab" class="tab">Register</button>
         </div>
+        <input id="username" placeholder="Username" maxlength="18">
+        <input id="password" type="password" placeholder="Password" maxlength="72">
+        <button id="authBtn" class="btn primary">Login</button>
+        <div id="authError" class="error"></div>
+      </div>
+    </section>
 
-        <div id="homeError" class="error"></div>
-      </section>
+    <section id="dashboard" class="hidden">
+      <nav class="nav">
+        <button data-view="play" class="nav-btn active">Play</button>
+        <button data-view="leaderboard" class="nav-btn">Leaderboard</button>
+        <button data-view="history" class="nav-btn">Match History</button>
+        <button data-view="profile" class="nav-btn">Profile</button>
+        <button id="logoutBtn" class="nav-btn">Logout</button>
+      </nav>
 
-      <section id="lobbyScreen" class="panel hidden">
-        <div class="section-head">
-          <div>
-            <div class="eyebrow">LOBBY</div>
-            <h2>Room <span id="lobbyCode"></span></h2>
-          </div>
-          <button id="copyCodeBtn" class="btn secondary">Copy Code</button>
-        </div>
-
-        <div id="lobbyPlayers" class="player-list"></div>
-
-        <div class="lobby-actions">
-          <button id="readyBtn" class="btn secondary">Ready</button>
-          <button id="startBtn" class="btn primary hidden">Start Match</button>
-        </div>
-        <div id="lobbyMessage" class="muted"></div>
-      </section>
-
-      <section id="gameScreen" class="hidden">
-        <div id="scoreRow" class="score-row"></div>
-
-        <div class="table">
-          <div class="table-top">
-            <div id="turnText" class="turn-text"></div>
-            <div id="lastEvent" class="last-event"></div>
-          </div>
-          <div id="board" class="board"></div>
-        </div>
-
-        <section class="panel hand-panel">
-          <div class="hand-top">
+      <section id="playView">
+        <div id="homeCard" class="panel">
+          <div class="profile-strip">
             <div>
-              <div class="eyebrow">YOUR HAND</div>
-              <h2 id="youName"></h2>
+              <div class="eyebrow">YOUR RATING</div>
+              <div class="rating-big" id="homeRating"></div>
+              <div class="tier" id="homeTier"></div>
             </div>
-            <div class="mode-toggle">
-              <button id="playModeBtn" class="mode active">Play</button>
-              <button id="discardModeBtn" class="mode">Discard</button>
+            <div class="stat-mini"><strong id="homeGames"></strong><span>Games</span></div>
+            <div class="stat-mini"><strong id="homeWins"></strong><span>Wins</span></div>
+            <div class="stat-mini"><strong id="homePodiums"></strong><span>Podiums</span></div>
+          </div>
+          <div class="play-actions">
+            <button id="createBtn" class="btn primary">Create Room</button>
+            <div class="join-box">
+              <input id="roomInput" maxlength="5" placeholder="ROOM">
+              <button id="joinBtn" class="btn secondary">Join Room</button>
             </div>
           </div>
+        </div>
 
-          <div id="actionHelp" class="action-help"></div>
-          <div id="hand" class="hand"></div>
+        <section id="lobbyScreen" class="panel hidden">
+          <div class="section-head">
+            <div><div class="eyebrow">LOBBY</div><h2>Room <span id="lobbyCode"></span></h2></div>
+            <div class="section-actions">
+              <button id="copyCodeBtn" class="btn secondary">Copy Code</button>
+              <button id="leaveRoomBtn" class="btn ghost">Leave</button>
+            </div>
+          </div>
+          <div id="lobbyPlayers" class="player-list"></div>
+          <div class="lobby-actions">
+            <button id="readyBtn" class="btn secondary">Ready</button>
+            <button id="startBtn" class="btn primary hidden">Start Match</button>
+          </div>
+          <div id="lobbyMessage" class="muted"></div>
+        </section>
+
+        <section id="gameScreen" class="hidden">
+          <div id="scoreRow" class="score-row"></div>
+          <div class="table">
+            <div class="table-top">
+              <div id="turnText" class="turn-text"></div>
+              <div id="lastEvent" class="last-event"></div>
+            </div>
+            <div id="board" class="board"></div>
+          </div>
+          <section class="panel hand-panel">
+            <div class="hand-top">
+              <div><div class="eyebrow">YOUR HAND</div><h2 id="youName"></h2></div>
+              <div class="mode-toggle">
+                <button id="playModeBtn" class="mode active">Play</button>
+                <button id="discardModeBtn" class="mode">Discard</button>
+              </div>
+            </div>
+            <div id="actionHelp" class="action-help"></div>
+            <div id="hand" class="hand"></div>
+          </section>
+        </section>
+
+        <section id="resultScreen" class="panel hidden">
+          <div class="eyebrow">RANKED RESULT</div>
+          <h2>Final Ranking</h2>
+          <div id="ranking"></div>
+          <button id="restartBtn" class="btn primary hidden">Back to Lobby</button>
         </section>
       </section>
 
-      <section id="resultScreen" class="panel hidden">
-        <div class="eyebrow">GAME OVER</div>
-        <h2>Final Ranking</h2>
-        <div id="ranking"></div>
-        <button id="restartBtn" class="btn primary hidden">Back to Lobby</button>
+      <section id="leaderboardView" class="panel hidden">
+        <div class="eyebrow">GLOBAL</div><h2>Leaderboard</h2>
+        <div id="leaderboard"></div>
       </section>
-    </main>
-  </div>
 
-  <div id="toast" class="toast hidden"></div>
+      <section id="historyView" class="panel hidden">
+        <div class="eyebrow">YOUR RECORD</div><h2>Match History</h2>
+        <div id="history"></div>
+      </section>
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="/client.js"></script>
+      <section id="profileView" class="panel hidden">
+        <div class="eyebrow">PLAYER PROFILE</div><h2 id="profileName"></h2>
+        <div id="profileStats" class="profile-stats"></div>
+      </section>
+    </section>
+  </main>
+</div>
+<div id="toast" class="toast hidden"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/client.js"></script>
 </body>
 </html>
