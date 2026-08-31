@@ -134,13 +134,9 @@ function renderGame(){
   const mine=getMyPlayer(), current=roomState.players.find(p=>p.id===roomState.currentPlayerId), myTurn=roomState.currentPlayerId===myPlayerId;
   $("youName").textContent=mine?.name||me.username;$("matchTypeBadge").textContent=(roomState.matchType||"casual").toUpperCase();$("turnText").textContent=current?`${current.name}'s turn`:"";$("lastEvent").textContent=roomState.lastEvent||"";
   const matchType=(roomState.matchType||roomState.mode||"casual").toUpperCase();
-  if($("exitPracticeBtn")) $("exitPracticeBtn").classList.toggle("hidden", matchType!=="PRACTICE");
-  $("gameModeBadge").textContent=matchType;
-  $("gameModeBadge").style.background=matchType==="RANKED"?"#c84c4c":matchType==="PRACTICE"?"#7392d8":"#e8d39a";
-  $("gameModeBadge").style.color=matchType==="RANKED"?"#fff":"#17140e";
   $("actionHelp").textContent=!myTurn?"Wait for your turn.":actionMode==="play"?"Play a highlighted card, or switch to Discard.":"DISCARD MODE: choose a card, then confirm before it is discarded.";
   if($("privateDiscardInfo")) $("privateDiscardInfo").textContent=`Your discard: ${privateState?.discardedCount||0} card(s) · private value ${privateState?.discardedScore||privateState?.score||0} pts`;
-  $("privateDiscardScore").innerHTML=`Your discard: <strong>${privateState?.discardedCount||0} card(s)</strong> · private value <strong>${privateState?.discardScore||0} pts</strong>`;
+  if($("privateDiscardScore")) $("privateDiscardScore").innerHTML=`Your discard: <strong>${privateState?.discardedCount||0} card(s)</strong> · private value <strong>${privateState?.discardScore||0} pts</strong>`;
   document.querySelector(".hand-panel")?.classList.toggle("discard-active",actionMode==="discard");
   $("scoreRow").innerHTML=roomState.players.map(p=>`<div class="score-card ${p.id===roomState.currentPlayerId?"current":""} ${p.id===myPlayerId?"me":""} ${p.isBot?"bot-player":""} ${p.isTemporaryBot?"temporary-bot":""}"><div class="score-name">${esc(p.name)}</div><div class="score-meta">${p.handCount} cards left · ${p.discardCount||0} discarded</div></div>`).join("");
   const board=$("board");board.innerHTML="";
@@ -215,14 +211,6 @@ if ($("botsBtn")) {
   $("botsBtn").onclick = () => socket.emit("playBots");
 }
 
-
-if ($("exitPracticeBtn")) {
-  $("exitPracticeBtn").onclick = () => {
-    if (confirm("Exit this practice match? Practice progress will be discarded.")) {
-      socket.emit("leaveRoom");
-    }
-  };
-}
 
 if ($("forfeitBtn")) {
   $("forfeitBtn").onclick = () => {

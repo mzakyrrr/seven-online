@@ -321,16 +321,6 @@ body{
   color:#a9bce8;
 }
 
-.exit-practice{
-  color:#d7b5b5;
-  border-color:#5b3434;
-  white-space:nowrap;
-}
-.exit-practice:hover{
-  background:#2a1717;
-  color:#fff;
-}
-
 /* Match focus mode */
 body.game-focus-mode .topbar,
 body.game-focus-mode .nav{

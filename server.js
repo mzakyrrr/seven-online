@@ -1167,8 +1167,14 @@ io.on("connection", socket => {
 
   
   socket.on("playBots", () => {
-    if (userActiveRoom.has(user.id)) {
-      return socket.emit("errorMessage", "You already have an active room.");
+    {
+      const active = ensureNoBlockingActiveRoom(user.id);
+      if (active.blocked) {
+        return socket.emit("activeMatchExists", {
+          roomCode: active.room.code,
+          matchType: active.room.matchType || active.room.mode || "match"
+        });
+      }
     }
 
     const human = makePlayer(user, socket);
@@ -1189,7 +1195,8 @@ io.on("connection", socket => {
       persisted: true,
       lastEvent: "Preparing practice match",
       botTimer: null,
-      pendingForfeits: new Set()
+      pendingForfeits: new Set(),
+      chatMessages: []
     };
 
     rooms.set(code, room);

@@ -49,3 +49,11 @@ This build includes an in-game visual refresh:
 - Stale `userActiveRoom` mappings are cleaned automatically.
 - Old lobby/queue seats are safely abandoned when starting a new game.
 - A genuinely active match still reconnects the user to the same seat.
+
+
+## v7.2 Practice render fix
+- Removed duplicate `Exit Practice`; all active matches now use one `Exit Match` action.
+- Fixed Practice mode rendering stopping before scoreboard/board/hand.
+- Removed stale `gameModeBadge` UI references from the old layout.
+- Added defensive UI rendering so missing optional elements do not break the whole match screen.
+- Play vs Bots now uses the same stale-room cleanup as other play modes.
