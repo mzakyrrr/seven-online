@@ -817,14 +817,14 @@ io.on("connection", socket => {
   });
 
   socket.on("toggleReady",()=>{
-    const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=="lobby") return;
+    const room=rooms.get(socket.data.roomCode); if(!room||room.phase==="playing") return;
     const p=room.players.find(x=>x.userId===user.id); if(!p) return;
     p.ready=!p.ready; emitState(room);
   });
 
   socket.on("startMatch",async()=>{
     try {
-      const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=="lobby") return;
+      const room=rooms.get(socket.data.roomCode); if(!room||room.phase==="playing") return;
       const p=room.players.find(x=>x.userId===user.id);
       if(!p||p.id!==room.hostPlayerId) return socket.emit("errorMessage","Only host can start.");
       if(room.players.length!==4) return socket.emit("errorMessage","Exactly 4 players required.");

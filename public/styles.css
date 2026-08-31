@@ -37,3 +37,10 @@ input{width:100%;background:#0c130f;border:1px solid var(--line);border-radius:1
 .private-score{margin-top:4px;color:var(--muted);font-size:13px}.private-score strong{color:var(--text)}
 .btn.danger{background:#b93636;color:#fff}.confirm-overlay{position:fixed;inset:0;background:rgba(3,7,5,.82);display:grid;place-items:center;z-index:120;padding:20px}.confirm-card{width:min(430px,100%);background:var(--panel);border:1px solid #6f3333;border-radius:22px;padding:24px;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,.5)}.discard-preview{display:flex;justify-content:center;margin:18px 0}.confirm-actions{display:flex;gap:10px;justify-content:center}.confirm-actions .btn{min-width:130px}
 @media(max-width:1050px){.game-main-grid{grid-template-columns:1fr}.chat-panel{min-height:300px;max-height:380px}}
+
+.result-actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:18px;
+}

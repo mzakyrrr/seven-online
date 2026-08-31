@@ -42,7 +42,9 @@ function connectSocket(){
   socket.on("joined",d=>{myPlayerId=d.playerId;});
   socket.on("roomState",s=>{roomState=s;ensureRoomDeckStyles(s);renderPlay();});
   socket.on("privateState",s=>{privateState=s;renderPlay()});
-  socket.on("leftRoom",()=>{roomState=null;privateState=null;myPlayerId=null;renderPlay()});
+  socket.on("leftRoom",()=>{roomState=null;privateState=null;myPlayerId=null;renderPlay()
+    showView("play");
+    renderPlay();});
   socket.on("queueStatus",q=>{queueState=q;renderPlay()});
   socket.on("queueCancelled",()=>{queueState=null;renderPlay()});
   socket.on("noActiveRoom",()=>{});
@@ -168,7 +170,20 @@ $("casualQuickBtn").onclick=()=>{queueState={mode:"casual",waiting:1};renderPlay
 $("rankedQuickBtn").onclick=()=>{queueState={mode:"ranked",waiting:1};renderPlay();socket.emit("quickPlay",{mode:"ranked"})};
 $("cancelQueueBtn").onclick=()=>socket.emit("cancelQueue");
 $("createBtn").onclick=()=>socket.emit("createRoom");$("joinBtn").onclick=()=>{const roomCode=$("roomInput").value.trim().toUpperCase();if(!roomCode)return toast("Enter a room code.");socket.emit("joinRoom",{roomCode})};
-$("readyBtn").onclick=()=>socket.emit("toggleReady");$("startBtn").onclick=()=>socket.emit("startMatch");$("restartBtn").onclick=()=>socket.emit("restartRoom");$("leaveRoomBtn").onclick=()=>socket.emit("leaveRoom");
+$("readyBtn").onclick=()=>socket.emit("toggleReady");$("startBtn").onclick=()=>socket.emit("startMatch");$("restartBtn").onclick=()=>socket.emit("restartRoom");
+
+$("backToPlayBtn").onclick=()=>{
+  if(socket && roomState){
+    socket.emit("leaveRoom");
+  }else{
+    roomState=null;
+    privateState=null;
+    myPlayerId=null;
+    showView("play");
+    renderPlay();
+  }
+};
+$("leaveRoomBtn").onclick=()=>socket.emit("leaveRoom");
 $("copyCodeBtn").onclick=async()=>{try{await navigator.clipboard.writeText(roomState.roomCode);toast("Room code copied.")}catch{toast(roomState.roomCode)}};
 $("playModeBtn").onclick=()=>{actionMode="play";$("playModeBtn").classList.add("active");$("discardModeBtn").classList.remove("active");renderPlay()};
 $("discardModeBtn").onclick=()=>{actionMode="discard";$("discardModeBtn").classList.add("active");$("playModeBtn").classList.remove("active");renderPlay()};

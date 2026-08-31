@@ -12,3 +12,9 @@ Based on the matchmaking/economy build.
 - Private room creation/join refreshes equipped deck from the database before seating the player
 
 No new database service or environment variable is required. Deploy over the existing Railway/GitHub project.
+
+## Post-match navigation
+
+After a match ends:
+- **Back to Lobby** keeps the same private room for a rematch (host flow).
+- **Back to Play Menu** leaves the finished room and returns the player to the Play screen for Quick Play or another room.
