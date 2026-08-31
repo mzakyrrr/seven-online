@@ -1,12 +1,9 @@
-# Deploy Seven v4
+# Deploy v5
 
-This is an in-place upgrade from the current Seven build.
+1. Replace the current GitHub repository files with this build.
+2. Commit to the branch connected to Railway.
+3. Let Railway auto-deploy, or deploy the newest commit.
+4. Keep the existing Postgres and variables unchanged.
+5. Hard-refresh the website after deployment.
 
-1. Replace the files in your existing GitHub repository with this build.
-2. Commit to your connected Railway branch.
-3. Railway can autodeploy the commit.
-4. Keep the existing Postgres service and environment variables. No new Railway service is needed.
-
-The database migration is automatic. It only adds `matches.match_type` if missing.
-
-Quick Play queues are currently held in server memory, which is fine while the app runs as one Railway instance. If you later scale to multiple server replicas, move matchmaking/room state to Redis.
+No database migration is required for these six playtest changes.

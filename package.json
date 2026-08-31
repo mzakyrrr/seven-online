@@ -1,8 +1,8 @@
 {
-  "name": "seven-online-v4",
-  "version": "4.0.0",
+  "name": "seven-online-v5-playtest-fixes",
+  "version": "5.0.0",
   "private": true,
-  "description": "Seven Online with casual/ranked matchmaking, private rooms, ranking, economy, shop, and match history",
+  "description": "Seven Online with matchmaking, economy, chat, per-player deck skins, discard confirmation and discard privacy",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

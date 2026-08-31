@@ -2,6 +2,8 @@ const $=id=>document.getElementById(id);
 const SUITS=["diamond","heart","club","spade"];
 const SYMBOL={diamond:"♦",heart:"♥",club:"♣",spade:"♠"};
 let authMode="login", me=null, socket=null, roomState=null, privateState=null, myPlayerId=null, actionMode="play", queueState=null;
+let deckStyles={classic:{slug:"classic",card_face_bg:"#fffdf8",card_face_accent:"#181818",card_back_accent:"#edd89a"}};
+let pendingDiscardCard=null;
 
 function toast(m){$("toast").textContent=m;$("toast").classList.remove("hidden");setTimeout(()=>$("toast").classList.add("hidden"),2400)}
 function esc(s){return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
@@ -38,12 +40,13 @@ function connectSocket(){
   socket=io();
   socket.on("connect",()=>socket.emit("resumeRoom"));
   socket.on("joined",d=>{myPlayerId=d.playerId;});
-  socket.on("roomState",s=>{roomState=s;renderPlay()});
+  socket.on("roomState",s=>{roomState=s;ensureRoomDeckStyles(s);renderPlay();});
   socket.on("privateState",s=>{privateState=s;renderPlay()});
   socket.on("leftRoom",()=>{roomState=null;privateState=null;myPlayerId=null;renderPlay()});
   socket.on("queueStatus",q=>{queueState=q;renderPlay()});
   socket.on("queueCancelled",()=>{queueState=null;renderPlay()});
   socket.on("noActiveRoom",()=>{});
+  socket.on("chatMessages",msgs=>{if(roomState){roomState.chatMessages=msgs;renderChat();}});
   socket.on("errorMessage",toast);
   socket.on("connect_error",()=>toast("Session expired. Please login again."));
 }
@@ -83,15 +86,65 @@ function playable(card){
   const seq=["2","3","4","5","6","7","8","9","10","J","Q","K"],s=roomState.board[card.suit];
   if(!s||s.closed||s.dead)return false;if(card.rank==="A")return s.opened&&(s.highestIndex===11||s.lowestIndex===0);if(!s.opened)return card.rank==="7";const i=seq.indexOf(card.rank);return(!s.lowerBlocked&&i===s.lowestIndex-1)||(!s.upperBlocked&&i===s.highestIndex+1)
 }
-function cardEl(card,small=false){const e=document.createElement("div");e.className=`card ${["diamond","heart"].includes(card.suit)?"red":""} ${small?"small":""}`;e.innerHTML=`<div class="rank">${card.rank}${SYMBOL[card.suit]}</div><div class="suit-symbol">${SYMBOL[card.suit]}</div><div class="rank bottom">${card.rank}${SYMBOL[card.suit]}</div>`;return e}
+async function ensureDeckStyle(slug){
+  slug=slug||"classic";
+  if(deckStyles[slug]) return deckStyles[slug];
+  try{const d=await api(`/api/deck-style/${encodeURIComponent(slug)}`);deckStyles[slug]=d.deck;renderPlay();return d.deck}catch{return deckStyles.classic}
+}
+function ensureRoomDeckStyles(state){
+  for(const p of state?.players||[]) ensureDeckStyle(p.deckSlug||"classic");
+}
+function styleForSlug(slug){return deckStyles[slug||"classic"]||deckStyles.classic}
+function cardEl(card,small=false,deckSlug="classic"){
+  const style=styleForSlug(deckSlug),e=document.createElement("div");
+  e.className=`card ${["diamond","heart"].includes(card.suit)?"red":""} ${small?"small":""}`;
+  e.style.background=style.card_face_bg||"#fffdf8";
+  e.style.borderColor=style.card_back_accent||"rgba(0,0,0,.13)";
+  if(!["diamond","heart"].includes(card.suit)) e.style.color=style.card_face_accent||"#181818";
+  e.innerHTML=`<div class="rank">${card.rank}${SYMBOL[card.suit]}</div><div class="suit-symbol">${SYMBOL[card.suit]}</div><div class="rank bottom">${card.rank}${SYMBOL[card.suit]}</div>`;
+  return e
+}
+function renderChat(){
+  const wrap=$("chatMessages"); if(!wrap||!roomState)return;
+  const atBottom=wrap.scrollHeight-wrap.scrollTop-wrap.clientHeight<50;
+  wrap.innerHTML=(roomState.chatMessages||[]).map(m=>`<div class="chat-msg ${m.playerId===myPlayerId?"mine":""}"><div class="chat-msg-name">${esc(m.name)}</div><div class="chat-msg-text">${esc(m.text)}</div></div>`).join("")||'<div class="muted">No messages yet.</div>';
+  if(atBottom||!wrap.dataset.loaded){wrap.scrollTop=wrap.scrollHeight;wrap.dataset.loaded="1"}
+}
+function openDiscardConfirmation(card){
+  pendingDiscardCard=card;
+  const preview=$("discardPreview");preview.innerHTML="";
+  preview.appendChild(cardEl(card,false,getMyPlayer()?.deckSlug||me?.equipped_deck_slug||"classic"));
+  $("discardModal").classList.remove("hidden");
+}
+function closeDiscardConfirmation(){pendingDiscardCard=null;$("discardModal").classList.add("hidden")}
 function renderGame(){
   const mine=getMyPlayer(), current=roomState.players.find(p=>p.id===roomState.currentPlayerId), myTurn=roomState.currentPlayerId===myPlayerId;
   $("youName").textContent=mine?.name||me.username;$("matchTypeBadge").textContent=(roomState.matchType||"casual").toUpperCase();$("turnText").textContent=current?`${current.name}'s turn`:"";$("lastEvent").textContent=roomState.lastEvent||"";
-  $("actionHelp").textContent=!myTurn?"Wait for your turn.":actionMode==="play"?"Play a highlighted card, or switch to Discard.":"Discard mode: choose any card. It stays hidden.";
-  $("scoreRow").innerHTML=roomState.players.map(p=>`<div class="score-card ${p.id===roomState.currentPlayerId?"current":""} ${p.id===myPlayerId?"me":""}"><div class="score-name">${esc(p.name)}</div><div class="score-meta">${p.handCount} cards · ${p.score} discard pts</div></div>`).join("");
+  $("actionHelp").textContent=!myTurn?"Wait for your turn.":actionMode==="play"?"Play a highlighted card, or switch to Discard.":"DISCARD MODE: choose a card, then confirm before it is discarded.";
+  $("privateDiscardScore").innerHTML=`Your discard: <strong>${privateState?.discardedCount||0} card(s)</strong> · private value <strong>${privateState?.discardScore||0} pts</strong>`;
+  document.querySelector(".hand-panel")?.classList.toggle("discard-active",actionMode==="discard");
+  $("scoreRow").innerHTML=roomState.players.map(p=>`<div class="score-card ${p.id===roomState.currentPlayerId?"current":""} ${p.id===myPlayerId?"me":""}"><div class="score-name">${esc(p.name)}</div><div class="score-meta">${p.handCount} cards left · ${p.discardCount||0} discarded</div></div>`).join("");
   const board=$("board");board.innerHTML="";
-  SUITS.forEach(suit=>{const s=roomState.board[suit],lane=document.createElement("div");lane.className="suit-lane";const status=s.dead?"Dead":s.closed?"Closed":s.opened?"Open":"Waiting";lane.innerHTML=`<div class="suit-head"><span>${SYMBOL[suit]} ${suit[0].toUpperCase()+suit.slice(1)}</span><span>${status}</span></div>`;const line=document.createElement("div");line.className="cards-line";if(!s.opened){line.innerHTML=`<div class="empty">${s.dead?"7 was discarded. Suit is dead.":"Waiting for 7"}</div>`}else{for(const r of s.playedRanks)line.appendChild(cardEl({suit,rank:r},true));if(s.acePlayed)line.appendChild(cardEl({suit,rank:"A"},true))}lane.appendChild(line);board.appendChild(lane)});
-  const hand=$("hand");hand.innerHTML="";for(const c of privateState?.hand||[]){const e=cardEl(c);const can=playable(c);e.classList.add("clickable");if(!myTurn||actionMode==="play"&&!can)e.classList.add("disabled");if(myTurn&&actionMode==="play"&&can)e.classList.add("playable");e.onclick=()=>{if(!myTurn)return;if(actionMode==="play"){if(!can)return toast("That card cannot be played.");socket.emit("playCard",{cardId:c.id})}else socket.emit("discardCard",{cardId:c.id})};hand.appendChild(e)}
+  SUITS.forEach(suit=>{
+    const st=roomState.board[suit],lane=document.createElement("div");lane.className="suit-lane";const status=st.dead?"Dead":st.closed?"Closed":st.opened?"Open":"Waiting";
+    lane.innerHTML=`<div class="suit-head"><span>${SYMBOL[suit]} ${suit[0].toUpperCase()+suit.slice(1)}</span><span>${status}</span></div>`;
+    const line=document.createElement("div");line.className="cards-line";
+    if(!st.opened){line.innerHTML=`<div class="empty">${st.dead?"7 was discarded. Suit is dead.":"Waiting for 7"}</div>`}
+    else{
+      const played=(st.playedCards&&st.playedCards.length)?st.playedCards:st.playedRanks.map(rank=>({rank,deckSlug:"classic"}));
+      for(const pc of played) line.appendChild(cardEl({suit,rank:pc.rank},true,pc.deckSlug||"classic"));
+      if(st.acePlayed){const ac=st.aceCard||{rank:"A",deckSlug:"classic"};line.appendChild(cardEl({suit,rank:"A"},true,ac.deckSlug||"classic"))}
+    }
+    lane.appendChild(line);board.appendChild(lane)
+  });
+  const hand=$("hand");hand.innerHTML="";const myDeck=mine?.deckSlug||me?.equipped_deck_slug||"classic";ensureDeckStyle(myDeck);
+  for(const c of privateState?.hand||[]){
+    const e=cardEl(c,false,myDeck),can=playable(c);e.classList.add("clickable");
+    if(!myTurn||actionMode==="play"&&!can)e.classList.add("disabled");if(myTurn&&actionMode==="play"&&can)e.classList.add("playable");
+    e.onclick=()=>{if(!myTurn)return;if(actionMode==="play"){if(!can)return toast("That card cannot be played.");socket.emit("playCard",{cardId:c.id})}else openDiscardConfirmation(c)};
+    hand.appendChild(e)
+  }
+  renderChat();
 }
 function renderResults(){
   $("ranking").innerHTML=(roomState.rankings||[]).map(r=>`<div class="result-row"><div class="result-rank">#${r.rank}</div><div><strong>${esc(r.name)}</strong><div class="muted">${r.score} discard pts · +${r.coinReward||0} Coins</div></div><div>${r.ratingAfter??""} ${r.tier??""}</div><div class="delta ${(r.ratingDelta||0)>=0?"plus":"minus"}">${roomState.matchType==="ranked"?`${(r.ratingDelta||0)>=0?"+":""}${r.ratingDelta??0}`:"Casual"}</div></div>`).join("");
@@ -120,4 +173,8 @@ $("copyCodeBtn").onclick=async()=>{try{await navigator.clipboard.writeText(roomS
 $("playModeBtn").onclick=()=>{actionMode="play";$("playModeBtn").classList.add("active");$("discardModeBtn").classList.remove("active");renderPlay()};
 $("discardModeBtn").onclick=()=>{actionMode="discard";$("discardModeBtn").classList.add("active");$("playModeBtn").classList.remove("active");renderPlay()};
 $("lootCoinsBtn").onclick=()=>openLootbox("coins");$("lootGemsBtn").onclick=()=>openLootbox("gems");
+$("cancelDiscardBtn").onclick=closeDiscardConfirmation;
+$("confirmDiscardBtn").onclick=()=>{if(!pendingDiscardCard)return;socket.emit("discardCard",{cardId:pendingDiscardCard.id});closeDiscardConfirmation()};
+$("discardModal").onclick=e=>{if(e.target===$("discardModal"))closeDiscardConfirmation()};
+$("chatForm").addEventListener("submit",e=>{e.preventDefault();const input=$("chatInput"),text=input.value.trim();if(!text||!socket)return;socket.emit("sendChat",{text});input.value=""});
 checkSession();

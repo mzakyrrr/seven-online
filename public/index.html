@@ -103,12 +103,22 @@
 
         <section id="gameScreen" class="hidden">
           <div id="scoreRow" class="score-row"></div>
-          <div class="table">
-            <div class="table-top">
-              <div id="matchTypeBadge" class="match-type-badge"></div><div id="turnText" class="turn-text"></div>
-              <div id="lastEvent" class="last-event"></div>
+          <div class="game-main-grid">
+            <div class="table">
+              <div class="table-top">
+                <div id="matchTypeBadge" class="match-type-badge"></div><div id="turnText" class="turn-text"></div>
+                <div id="lastEvent" class="last-event"></div>
+              </div>
+              <div id="board" class="board"></div>
             </div>
-            <div id="board" class="board"></div>
+            <aside class="chat-panel">
+              <div class="chat-head"><div><div class="eyebrow">ROOM CHAT</div><strong>Table Talk</strong></div></div>
+              <div id="chatMessages" class="chat-messages"></div>
+              <form id="chatForm" class="chat-form">
+                <input id="chatInput" maxlength="200" placeholder="Type a message..." autocomplete="off">
+                <button class="btn primary" type="submit">Send</button>
+              </form>
+            </aside>
           </div>
           <section class="panel hand-panel">
             <div class="hand-top">
@@ -118,7 +128,7 @@
                 <button id="discardModeBtn" class="mode">Discard</button>
               </div>
             </div>
-            <div id="actionHelp" class="action-help"></div>
+            <div id="actionHelp" class="action-help"></div><div id="privateDiscardScore" class="private-score"></div>
             <div id="hand" class="hand"></div>
           </section>
         </section>
@@ -149,6 +159,15 @@
       </section>
     </section>
   </main>
+</div>
+<div id="discardModal" class="confirm-overlay hidden">
+  <div class="confirm-card">
+    <div class="eyebrow">CONFIRM DISCARD</div>
+    <h2>Discard this card?</h2>
+    <div id="discardPreview" class="discard-preview"></div>
+    <p>This card will be removed from your hand and its value added to your private discard score.</p>
+    <div class="confirm-actions"><button id="cancelDiscardBtn" class="btn secondary">Cancel</button><button id="confirmDiscardBtn" class="btn danger">Discard Card</button></div>
+  </div>
 </div>
 <div id="toast" class="toast hidden"></div>
 <script src="/socket.io/socket.io.js"></script>

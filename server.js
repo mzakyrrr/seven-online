@@ -379,8 +379,8 @@ function shuffleDeck(deck) {
 function createBoard() {
   const board = {};
   SUITS.forEach(suit => board[suit] = {
-    opened:false, playedRanks:[], lowestIndex:null, highestIndex:null,
-    lowerBlocked:false, upperBlocked:false, closed:false, dead:false, acePlayed:false
+    opened:false, playedRanks:[], playedCards:[], lowestIndex:null, highestIndex:null,
+    lowerBlocked:false, upperBlocked:false, closed:false, dead:false, acePlayed:false, aceCard:null
   });
   return board;
 }
@@ -406,17 +406,18 @@ function publicRoomState(room) {
     currentPlayerId: room.currentPlayerId,
     board: room.board,
     players: room.players.map(p => ({
-      id:p.id, userId:p.userId, name:p.name, score:p.score,
+      id:p.id, userId:p.userId, name:p.name, discardCount:p.discardedCards.length,
       handCount:p.hand.length, ready:p.ready, connected:p.connected,
       isHost:p.id===room.hostPlayerId,
       deckSlug:p.deckSlug||'classic'
     })),
     rankings: room.rankings,
-    lastEvent: room.lastEvent
+    lastEvent: room.lastEvent,
+    chatMessages: room.chatMessages || []
   };
 }
 function privatePlayerState(player) {
-  return { playerId:player.id, hand:player.hand, discardedCount:player.discardedCards.length };
+  return { playerId:player.id, hand:player.hand, discardedCount:player.discardedCards.length, discardScore:player.score };
 }
 function emitState(room) {
   io.to(room.code).emit("roomState", publicRoomState(room));
@@ -434,7 +435,7 @@ function playOpeningSevenDiamond(room) {
   const idx = holder.hand.findIndex(c=>c.id==="diamond-7");
   holder.hand.splice(idx,1);
   const s = room.board.diamond;
-  s.opened=true; s.lowestIndex=5; s.highestIndex=5; s.playedRanks=["7"];
+  s.opened=true; s.lowestIndex=5; s.highestIndex=5; s.playedRanks=["7"]; s.playedCards=[{rank:"7",playerId:holder.id,deckSlug:holder.deckSlug||"classic"}];
   const holderIndex = room.players.findIndex(p=>p.id===holder.id);
   room.currentPlayerId = room.players[(holderIndex+1)%4].id;
   room.lastEvent = `${holder.name} opened with 7♦`;
@@ -447,16 +448,18 @@ function isCardPlayable(card, board) {
   const idx=SEQUENCE.indexOf(card.rank);
   return (!s.lowerBlocked && idx===s.lowestIndex-1) || (!s.upperBlocked && idx===s.highestIndex+1);
 }
-function updateBoardAfterPlay(room, card) {
+function updateBoardAfterPlay(room, card, player) {
   const s=room.board[card.suit], idx=SEQUENCE.indexOf(card.rank);
   if (!s.opened) {
-    s.opened=true; s.lowestIndex=idx; s.highestIndex=idx; s.playedRanks=[card.rank]; return;
+    s.opened=true; s.lowestIndex=idx; s.highestIndex=idx; s.playedRanks=[card.rank]; s.playedCards=[{rank:card.rank,playerId:player.id,deckSlug:player.deckSlug||"classic"}]; return;
   }
   if (idx===s.lowestIndex-1) s.lowestIndex=idx;
   if (idx===s.highestIndex+1) s.highestIndex=idx;
   if (!s.playedRanks.includes(card.rank)) {
     s.playedRanks.push(card.rank);
     s.playedRanks.sort((a,b)=>SEQUENCE.indexOf(a)-SEQUENCE.indexOf(b));
+    s.playedCards.push({rank:card.rank,playerId:player.id,deckSlug:player.deckSlug||"classic"});
+    s.playedCards.sort((a,b)=>SEQUENCE.indexOf(a.rank)-SEQUENCE.indexOf(b.rank));
   }
 }
 function wasDiscarded(room,suit,rank){ return room.discardedCardIds.has(`${suit}-${rank}`); }
@@ -476,8 +479,8 @@ function autoDiscardEntireSuit(room,suit){
     p.hand=keep;
   }
 }
-function closeSuit(room,suit){
-  const s=room.board[suit]; s.closed=true; s.acePlayed=true; autoDiscardEntireSuit(room,suit);
+function closeSuit(room,suit,player){
+  const s=room.board[suit]; s.closed=true; s.acePlayed=true; s.aceCard={rank:"A",playerId:player.id,deckSlug:player.deckSlug||"classic"}; autoDiscardEntireSuit(room,suit);
 }
 function calculateRanking(players){
   const sorted=[...players].sort((a,b)=>a.score-b.score);
@@ -685,7 +688,7 @@ async function createQuickMatch(entries, mode) {
   const room = {
     code, phase:"lobby", hostPlayerId:players[0].id, players, currentPlayerId:null,
     board:createBoard(), discardedCardIds:new Set(), rankings:null, persisted:false,
-    matchType:mode, isPrivate:false, lastEvent:`${mode === "ranked" ? "Ranked" : "Casual"} match found`
+    matchType:mode, isPrivate:false, chatMessages:[], lastEvent:`${mode === "ranked" ? "Ranked" : "Casual"} match found`
   };
   rooms.set(code, room);
   await startMatch(room);
@@ -775,15 +778,16 @@ io.on("connection", socket => {
     emitQueueStatuses("ranked");
   });
 
-  socket.on("createRoom", () => {
+  socket.on("createRoom", async () => {
     if (queueStatusFor(user.id)) return socket.emit("errorMessage","Cancel matchmaking first.");
     if (userActiveRoom.has(user.id)) return socket.emit("errorMessage","You already have an active room.");
     const code=generateRoomCode();
-    const player=makePlayer(user,socket);
+    const freshUser=await getUserById(user.id);
+    const player=makePlayer(freshUser||user,socket);
     const room={
       code,phase:"lobby",hostPlayerId:player.id,players:[player],currentPlayerId:null,
       board:createBoard(),discardedCardIds:new Set(),rankings:null,persisted:false,
-      matchType:"casual",isPrivate:true,
+      matchType:"casual",isPrivate:true,chatMessages:[],
       lastEvent:`${player.name} created a private casual room`
     };
     rooms.set(code,room); userActiveRoom.set(user.id,code);
@@ -792,7 +796,7 @@ io.on("connection", socket => {
     emitState(room);
   });
 
-  socket.on("joinRoom", ({roomCode}) => {
+  socket.on("joinRoom", async ({roomCode}) => {
     if (queueStatusFor(user.id)) return socket.emit("errorMessage","Cancel matchmaking first.");
     const code=String(roomCode||"").trim().toUpperCase();
     const room=rooms.get(code);
@@ -803,7 +807,8 @@ io.on("connection", socket => {
     if(userActiveRoom.has(user.id)) return socket.emit("errorMessage","You already have an active room.");
     if(room.players.some(p=>p.userId===user.id)) return socket.emit("errorMessage","You are already in this room.");
 
-    const player=makePlayer(user,socket);
+    const freshUser=await getUserById(user.id);
+    const player=makePlayer(freshUser||user,socket);
     room.players.push(player); room.lastEvent=`${player.name} joined the room`;
     userActiveRoom.set(user.id,code);
     socket.data.roomCode=code; socket.join(code);
@@ -829,6 +834,18 @@ io.on("connection", socket => {
     } catch(err){ console.error(err); socket.emit("errorMessage","Could not start match."); }
   });
 
+  socket.on("sendChat", ({text}) => {
+    const room=rooms.get(socket.data.roomCode);
+    if(!room || !["lobby","playing"].includes(room.phase)) return;
+    const p=room.players.find(x=>x.userId===user.id); if(!p) return;
+    const clean=String(text||"").trim().slice(0,200);
+    if(!clean) return;
+    room.chatMessages = room.chatMessages || [];
+    room.chatMessages.push({id:`m_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,playerId:p.id,name:p.name,text:clean,createdAt:Date.now()});
+    if(room.chatMessages.length>50) room.chatMessages=room.chatMessages.slice(-50);
+    io.to(room.code).emit("chatMessages", room.chatMessages);
+  });
+
   socket.on("playCard",async({cardId})=>{
     try{
       const room=rooms.get(socket.data.roomCode); if(!room||room.phase!=="playing") return;
@@ -838,8 +855,8 @@ io.on("connection", socket => {
       const card=p.hand[idx];
       if(!isCardPlayable(card,room.board)) return socket.emit("errorMessage","That card cannot be played.");
       p.hand.splice(idx,1);
-      if(card.rank==="A"){ closeSuit(room,card.suit); room.lastEvent=`${p.name} closed ${card.suit}`; }
-      else { updateBoardAfterPlay(room,card); refreshBlockedPaths(room,card.suit); room.lastEvent=`${p.name} played ${card.rank}${SUIT_SYMBOLS[card.suit]}`; }
+      if(card.rank==="A"){ closeSuit(room,card.suit,p); room.lastEvent=`${p.name} closed ${card.suit}`; }
+      else { updateBoardAfterPlay(room,card,p); refreshBlockedPaths(room,card.suit); room.lastEvent=`${p.name} played ${card.rank}${SUIT_SYMBOLS[card.suit]}`; }
       await advanceTurn(room); emitState(room);
     }catch(err){console.error(err); socket.emit("errorMessage","Action failed.");}
   });

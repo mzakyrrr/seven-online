@@ -1,14 +1,14 @@
-# Seven Online v4 Matchmaking
+# Seven Online v5 Playtest Fixes
 
-Adds to v3:
-- Casual Quick Play
-- Ranked Quick Play
-- Auto matchmaking and auto-start at 4 players
-- Cancel matchmaking queue
-- Ranked rating search expands over time
-- Private rooms remain Casual-only
-- Casual and Ranked labels in match history
-- Ranked changes Elo; Casual does not
-- Different Coin rewards by mode
+Based on the matchmaking/economy build.
 
-Economy, Shop, Collection, login, leaderboard and core Seven gameplay are preserved.
+## Changes
+- In-game room chat beside the card table
+- Equipped deck skin now renders on the owner's hand and on cards that player places on the table
+- Discard action requires confirmation
+- Hand area turns red while Discard mode is active
+- Other players only see discarded-card count, never discard point value
+- Your own discard count and total discard value remain visible privately
+- Private room creation/join refreshes equipped deck from the database before seating the player
+
+No new database service or environment variable is required. Deploy over the existing Railway/GitHub project.
