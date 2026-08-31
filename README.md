@@ -42,3 +42,10 @@ This build includes an in-game visual refresh:
   - prefer preserving useful Aces
   - choose Ace closures based on remaining cards in their own hand
 - Bots do not need access to opponents' private hands to choose an action.
+
+
+## v7.1 Active room fix
+- Finished or deleted rooms no longer block Quick Play / Create Room.
+- Stale `userActiveRoom` mappings are cleaned automatically.
+- Old lobby/queue seats are safely abandoned when starting a new game.
+- A genuinely active match still reconnects the user to the same seat.

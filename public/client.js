@@ -54,6 +54,10 @@ function connectSocket(){
   socket.on("queueStatus",q=>{queueState=q;renderPlay()});
   socket.on("queueCancelled",()=>{queueState=null;renderPlay()});
   socket.on("noActiveRoom",()=>{});
+  socket.on("activeMatchExists",d=>{
+    toast("You still have a live match. Reconnecting...");
+    socket.emit("resumeRoom");
+  });
   socket.on("chatMessages",msgs=>{if(roomState){roomState.chatMessages=msgs;renderChat();}});
   socket.on("errorMessage",toast);
   socket.on("connect_error",()=>toast("Session expired. Please login again."));

@@ -1032,6 +1032,75 @@ function activateTemporaryBot(room, userId) {
   return bot;
 }
 
+
+function getValidActiveRoomForUser(userId) {
+  const uid = String(userId);
+  const code = userActiveRoom.get(uid);
+  if (!code) return null;
+
+  const room = rooms.get(code);
+
+  // Mapping points to a room that no longer exists.
+  if (!room) {
+    userActiveRoom.delete(uid);
+    return null;
+  }
+
+  const seat = room.players.find(p =>
+    String(p.userId) === uid ||
+    String(p.originalUserId) === uid
+  );
+
+  // User no longer has a seat in that room.
+  if (!seat) {
+    userActiveRoom.delete(uid);
+    return null;
+  }
+
+  // Finished rooms must never block starting another game.
+  if (room.phase === "finished") {
+    userActiveRoom.delete(uid);
+    return null;
+  }
+
+  return room;
+}
+
+function ensureNoBlockingActiveRoom(userId) {
+  const room = getValidActiveRoomForUser(userId);
+  if (!room) return { blocked:false, room:null };
+
+  // Only an actually running match should block a new one.
+  if (room.phase === "playing") {
+    return { blocked:true, room };
+  }
+
+  // Old lobby/queue rooms can be abandoned safely.
+  const uid = String(userId);
+  const seatIndex = room.players.findIndex(p =>
+    String(p.userId) === uid ||
+    String(p.originalUserId) === uid
+  );
+
+  if (seatIndex >= 0) {
+    const wasHost = room.players[seatIndex].id === room.hostPlayerId;
+    room.players.splice(seatIndex, 1);
+
+    if (room.players.length === 0) {
+      clearTimeout(room.botTimer);
+      rooms.delete(room.code);
+    } else if (wasHost) {
+      room.hostPlayerId = room.players[0].id;
+      emitState(room);
+    } else {
+      emitState(room);
+    }
+  }
+
+  userActiveRoom.delete(uid);
+  return { blocked:false, room:null };
+}
+
 io.use(async (socket, next) => {
   try {
     const cookies = parseCookieHeader(socket.handshake.headers.cookie || "");
@@ -1070,7 +1139,15 @@ io.on("connection", socket => {
     try {
       mode = String(mode || "").toLowerCase();
       if (!["casual","ranked"].includes(mode)) return socket.emit("errorMessage","Invalid matchmaking mode.");
-      if (userActiveRoom.has(user.id)) return socket.emit("errorMessage","You already have an active room.");
+      {
+      const active = ensureNoBlockingActiveRoom(user.id);
+      if (active.blocked) {
+        return socket.emit("activeMatchExists", {
+          roomCode: active.room.code,
+          matchType: active.room.matchType || active.room.mode || "match"
+        });
+      }
+    }
       removeFromQueues(user.id);
       quickQueues[mode].push({ userId:user.id, socketId:socket.id, joinedAt:Date.now(), rating:user.rating });
       socket.emit("queueStatus", { mode, position:quickQueues[mode].length, waiting:quickQueues[mode].length });
@@ -1126,7 +1203,15 @@ io.on("connection", socket => {
 
 socket.on("createRoom", async () => {
     if (queueStatusFor(user.id)) return socket.emit("errorMessage","Cancel matchmaking first.");
-    if (userActiveRoom.has(user.id)) return socket.emit("errorMessage","You already have an active room.");
+    {
+      const active = ensureNoBlockingActiveRoom(user.id);
+      if (active.blocked) {
+        return socket.emit("activeMatchExists", {
+          roomCode: active.room.code,
+          matchType: active.room.matchType || active.room.mode || "match"
+        });
+      }
+    }
     const code=generateRoomCode();
     const freshUser=await getUserById(user.id);
     const player=makePlayer(freshUser||user,socket);
@@ -1151,7 +1236,15 @@ socket.on("createRoom", async () => {
     if(room.phase!=="lobby") return socket.emit("errorMessage","Game already started.");
     if(!room.isPrivate) return socket.emit("errorMessage","Quick Play rooms cannot be joined by code.");
     if(room.players.length>=4) return socket.emit("errorMessage","Room is full.");
-    if(userActiveRoom.has(user.id)) return socket.emit("errorMessage","You already have an active room.");
+    {
+      const active = ensureNoBlockingActiveRoom(user.id);
+      if (active.blocked) {
+        return socket.emit("activeMatchExists", {
+          roomCode: active.room.code,
+          matchType: active.room.matchType || active.room.mode || "match"
+        });
+      }
+    }
     if(room.players.some(p=>p.userId===user.id)) return socket.emit("errorMessage","You are already in this room.");
 
     const freshUser=await getUserById(user.id);
