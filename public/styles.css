@@ -330,3 +330,22 @@ body{
   background:#2a1717;
   color:#fff;
 }
+
+/* Match focus mode */
+body.game-focus-mode .topbar,
+body.game-focus-mode .nav{
+  display:none !important;
+}
+body.game-focus-mode .shell{
+  width:min(1600px,calc(100% - 20px));
+  padding-top:10px;
+}
+.forfeit-btn{
+  background:#351717;
+  color:#ffbcbc;
+  border:1px solid #6e3030;
+  white-space:nowrap;
+}
+.forfeit-btn:hover{background:#562020;color:#fff}
+.temporary-bot{border-color:#6f6a42 !important}
+.temporary-bot::after{content:"BOT TAKEOVER" !important;color:#e8d67d !important}

@@ -410,6 +410,7 @@ function publicRoomState(room) {
       handCount:p.hand.length, ready:p.ready, connected:p.connected,
       isHost:p.id===room.hostPlayerId,
       isBot:!!p.isBot,
+      isTemporaryBot:!!p.isTemporaryBot,
       deckSlug:p.deckSlug||'classic'
     })),
     rankings: room.rankings,
@@ -536,12 +537,18 @@ async function persistMatch(room) {
       [room.code, room.matchType || "casual"]
     );
     const matchId = matchRes.rows[0].id;
+    const pendingForfeitIds = room.pendingForfeits ? new Set([...room.pendingForfeits].map(String)) : new Set();
 
     for (const r of rankings) {
       const p = room.players.find(x=>x.userId===r.userId);
       const before = p.ratingAtStart;
       const delta = deltas[p.userId] || 0;
-      const after = Math.max(0, before + delta);
+      let after = Math.max(0, before + delta);
+      const forfeited = pendingForfeitIds.has(String(p.userId));
+      const forfeitRatingPenalty = forfeited && room.matchType === "ranked" ? 40 : 0;
+      const forfeitCoinPenalty = forfeited && room.matchType === "ranked" ? 100 :
+                                 forfeited && room.matchType !== "practice" ? 75 : 0;
+      after = Math.max(0, after - forfeitRatingPenalty);
 
       await client.query(
         `INSERT INTO match_players
@@ -556,8 +563,8 @@ async function persistMatch(room) {
 
       await client.query(
         `UPDATE users
-         SET rating=$1, games_played=games_played+1, wins=wins+$2, podiums=podiums+$3, coins=coins+$4
-         WHERE id=$5`,
+         SET rating=$1, games_played=games_played+1, wins=wins+$2, podiums=podiums+$3, coins=GREATEST(0, coins+$4-$5)
+         WHERE id=$6`,
         [after,r.rank===1?1:0,r.rank<=3?1:0,coinReward,p.userId]
       );
       await client.query(
@@ -569,13 +576,18 @@ async function persistMatch(room) {
       r.coinReward = coinReward;
       r.ratingBefore = before;
       r.ratingAfter = after;
-      r.ratingDelta = delta;
+      r.ratingDelta = delta - forfeitRatingPenalty;
+      r.forfeitPenalty = { rating: forfeitRatingPenalty, coins: forfeitCoinPenalty };
       r.tier = tierForRating(after);
       r.matchType = room.matchType;
     }
 
     await client.query("COMMIT");
     room.rankings = rankings;
+    for (const rp of room.players) {
+      const uid = rp.userId || rp.originalUserId;
+      if (uid) userActiveRoom.delete(String(uid));
+    }
   } catch (err) {
     await client.query("ROLLBACK");
     room.persisted = false;
@@ -689,6 +701,7 @@ async function createQuickMatch(entries, mode) {
   const room = {
     code, phase:"lobby", hostPlayerId:players[0].id, players, currentPlayerId:null,
     board:createBoard(), discardedCardIds:new Set(), rankings:null, persisted:false,
+      pendingForfeits:new Set(),
     matchType:mode, isPrivate:false, chatMessages:[], lastEvent:`${mode === "ranked" ? "Ranked" : "Casual"} match found`
   };
   rooms.set(code, room);
@@ -968,6 +981,58 @@ function startBotPractice(room) {
   scheduleBotTurn(room);
 }
 
+
+function makeTemporaryBotFromPlayer(player) {
+  return {
+    ...player,
+    socketId: null,
+    connected: true,
+    isBot: true,
+    isTemporaryBot: true,
+    originalUserId: player.userId,
+    originalName: player.name,
+    name: `${player.name} [BOT]`
+  };
+}
+
+function restoreHumanSeat(room, user, socket) {
+  const uid = String(user.id);
+  const idx = room.players.findIndex(p => String(p.userId) === uid || String(p.originalUserId) === uid);
+  if (idx < 0) return null;
+
+  const seat = room.players[idx];
+  const restored = {
+    ...seat,
+    socketId: socket.id,
+    connected: true,
+    isBot: false,
+    isTemporaryBot: false,
+    userId: uid,
+    originalUserId: null,
+    name: seat.originalName || user.username
+  };
+  room.players[idx] = restored;
+  room.pendingForfeits?.delete(uid);
+  room.lastEvent = `${restored.name} reconnected`;
+  return restored;
+}
+
+function activateTemporaryBot(room, userId) {
+  const uid = String(userId);
+  const idx = room.players.findIndex(p => String(p.userId) === uid);
+  if (idx < 0) return null;
+  const player = room.players[idx];
+  if (player.isBot) return player;
+
+  room.pendingForfeits ||= new Set();
+  room.pendingForfeits.add(uid);
+  const bot = makeTemporaryBotFromPlayer(player);
+  room.players[idx] = bot;
+  room.lastEvent = `${player.name} left. Bot took over the seat.`;
+  if (room.currentPlayerId === bot.id) scheduleBotTurn(room);
+  return bot;
+}
+
 io.use(async (socket, next) => {
   try {
     const cookies = parseCookieHeader(socket.handshake.headers.cookie || "");
@@ -994,14 +1059,12 @@ io.on("connection", socket => {
       return socket.emit("noActiveRoom");
     }
 
-    const player = room.players.find(p=>p.userId===user.id);
+    const player = restoreHumanSeat(room, user, socket);
     if (!player) return socket.emit("noActiveRoom");
-
-    player.socketId=socket.id; player.connected=true;
     socket.data.roomCode=code; socket.join(code);
     socket.emit("joined",{roomCode:code,playerId:player.id,resumed:true});
     emitState(room);
-    if (room.matchType === "practice") scheduleBotTurn(room);
+    scheduleBotTurn(room);
   });
 
   socket.on("quickPlay", async ({mode}) => {
@@ -1049,7 +1112,8 @@ io.on("connection", socket => {
       rankings: null,
       persisted: true,
       lastEvent: "Preparing practice match",
-      botTimer: null
+      botTimer: null,
+      pendingForfeits: new Set()
     };
 
     rooms.set(code, room);
@@ -1070,6 +1134,7 @@ socket.on("createRoom", async () => {
     const room={
       code,phase:"lobby",hostPlayerId:player.id,players:[player],currentPlayerId:null,
       board:createBoard(),discardedCardIds:new Set(),rankings:null,persisted:false,
+      pendingForfeits:new Set(),
       matchType:"casual",isPrivate:true,chatMessages:[],
       lastEvent:`${player.name} created a private casual room`
     };
@@ -1166,7 +1231,19 @@ socket.on("createRoom", async () => {
     resetGameData(room); emitState(room);
   });
 
-  socket.on("leaveRoom",()=>{
+  
+  socket.on("forfeitMatch",()=>{
+    const room=rooms.get(socket.data.roomCode);
+    if(!room || room.phase!=="playing") return;
+    activateTemporaryBot(room, user.id);
+    socket.leave(room.code);
+    socket.data.roomCode=null;
+    emitState(room);
+    scheduleBotTurn(room);
+    socket.emit("forfeitPending",{message:"Bot takeover active. Reconnect before match end to avoid penalty."});
+  });
+
+socket.on("leaveRoom",()=>{
     const room=rooms.get(socket.data.roomCode);
     if(!room) return;
     if(room.phase==="playing" && room.matchType!=="practice") return;
@@ -1192,17 +1269,16 @@ socket.on("createRoom", async () => {
   });
 
   socket.on("disconnect",()=>{
-    removeFromQueues(user.id);
     const code=userActiveRoom.get(user.id), room=code?rooms.get(code):null;
     if(!room) return;
-    const p=room.players.find(x=>x.userId===user.id);
-    if(p){
-      p.connected=false;
-      p.socketId=null;
-      if (room.matchType !== "practice") room.lastEvent=`${p.name} disconnected`;
+    if(room.phase==="playing"){
+      activateTemporaryBot(room, user.id);
       emitState(room);
-      if (room.matchType === "practice") scheduleBotTurn(room);
+      scheduleBotTurn(room);
+      return;
     }
+    const p=room.players.find(x=>x.userId===user.id);
+    if(p){p.connected=false;p.socketId=null;room.lastEvent=`${p.name} disconnected`;emitState(room);}
   });
 });
 

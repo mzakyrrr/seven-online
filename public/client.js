@@ -1,3 +1,9 @@
+
+function updateGameFocusMode(){
+  const playing = roomState?.phase === "playing";
+  document.body.classList.toggle("game-focus-mode", playing);
+  if ($("forfeitBtn")) $("forfeitBtn").classList.toggle("hidden", !playing);
+}
 const $=id=>document.getElementById(id);
 const SUITS=["diamond","heart","club","spade"];
 const SYMBOL={diamond:"♦",heart:"♥",club:"♣",spade:"♠"};
@@ -63,6 +69,7 @@ function showView(view){
 }
 function getMyPlayer(){return roomState?.players?.find(p=>p.id===myPlayerId)}
 function renderPlay(){
+  updateGameFocusMode();
   const inRoom=!!roomState;
   $("homeCard").classList.toggle("hidden",inRoom);
   if(!inRoom){
@@ -131,7 +138,7 @@ function renderGame(){
   if($("privateDiscardInfo")) $("privateDiscardInfo").textContent=`Your discard: ${privateState?.discardedCount||0} card(s) · private value ${privateState?.discardedScore||privateState?.score||0} pts`;
   $("privateDiscardScore").innerHTML=`Your discard: <strong>${privateState?.discardedCount||0} card(s)</strong> · private value <strong>${privateState?.discardScore||0} pts</strong>`;
   document.querySelector(".hand-panel")?.classList.toggle("discard-active",actionMode==="discard");
-  $("scoreRow").innerHTML=roomState.players.map(p=>`<div class="score-card ${p.id===roomState.currentPlayerId?"current":""} ${p.id===myPlayerId?"me":""} ${p.isBot?"bot-player":""}"><div class="score-name">${esc(p.name)}</div><div class="score-meta">${p.handCount} cards left · ${p.discardCount||0} discarded</div></div>`).join("");
+  $("scoreRow").innerHTML=roomState.players.map(p=>`<div class="score-card ${p.id===roomState.currentPlayerId?"current":""} ${p.id===myPlayerId?"me":""} ${p.isBot?"bot-player":""} ${p.isTemporaryBot?"temporary-bot":""}"><div class="score-name">${esc(p.name)}</div><div class="score-meta">${p.handCount} cards left · ${p.discardCount||0} discarded</div></div>`).join("");
   const board=$("board");board.innerHTML="";
   SUITS.forEach(suit=>{
     const st=roomState.board[suit],lane=document.createElement("div");lane.className="suit-lane";const status=st.dead?"Dead":st.closed?"Closed":st.opened?"Open":"Waiting";
@@ -209,6 +216,28 @@ if ($("exitPracticeBtn")) {
   $("exitPracticeBtn").onclick = () => {
     if (confirm("Exit this practice match? Practice progress will be discarded.")) {
       socket.emit("leaveRoom");
+    }
+  };
+}
+
+if ($("forfeitBtn")) {
+  $("forfeitBtn").onclick = () => {
+    if (!roomState || roomState.phase !== "playing") return;
+    const type = (roomState.matchType || "casual").toLowerCase();
+    const penalty = type === "ranked"
+      ? "If you stay away until the match ends: -40 rating and -100 Coins."
+      : type === "practice"
+      ? "Practice has no penalty."
+      : "If you stay away until the match ends: -75 Coins.";
+
+    if (confirm(`Exit this match?\n\nA smart bot will immediately take over your exact seat and hand.\n\n${penalty}\n\nIf you reconnect before the match ends, you reclaim your seat and receive no penalty.`)) {
+      socket.emit("forfeitMatch");
+      roomState = null;
+      privateState = null;
+      myPlayerId = null;
+      document.body.classList.remove("game-focus-mode");
+      showView("play");
+      renderPlay();
     }
   };
 }
