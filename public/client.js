@@ -123,6 +123,7 @@ function renderGame(){
   const mine=getMyPlayer(), current=roomState.players.find(p=>p.id===roomState.currentPlayerId), myTurn=roomState.currentPlayerId===myPlayerId;
   $("youName").textContent=mine?.name||me.username;$("matchTypeBadge").textContent=(roomState.matchType||"casual").toUpperCase();$("turnText").textContent=current?`${current.name}'s turn`:"";$("lastEvent").textContent=roomState.lastEvent||"";
   const matchType=(roomState.matchType||roomState.mode||"casual").toUpperCase();
+  if($("exitPracticeBtn")) $("exitPracticeBtn").classList.toggle("hidden", matchType!=="PRACTICE");
   $("gameModeBadge").textContent=matchType;
   $("gameModeBadge").style.background=matchType==="RANKED"?"#c84c4c":matchType==="PRACTICE"?"#7392d8":"#e8d39a";
   $("gameModeBadge").style.color=matchType==="RANKED"?"#fff":"#17140e";
@@ -201,4 +202,13 @@ checkSession();
 
 if ($("botsBtn")) {
   $("botsBtn").onclick = () => socket.emit("playBots");
+}
+
+
+if ($("exitPracticeBtn")) {
+  $("exitPracticeBtn").onclick = () => {
+    if (confirm("Exit this practice match? Practice progress will be discarded.")) {
+      socket.emit("leaveRoom");
+    }
+  };
 }

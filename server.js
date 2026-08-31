@@ -921,13 +921,29 @@ async function performBotTurn(room) {
 
 function scheduleBotTurn(room) {
   if (!room || room.phase !== "playing") return;
+
+  clearTimeout(room.botTimer);
+
   const current = room.players.find(p => p.id === room.currentPlayerId);
   if (!current?.isBot) return;
 
-  clearTimeout(room.botTimer);
-  room.botTimer = setTimeout(() => {
-    performBotTurn(room).catch(err => console.error("Bot turn failed:", err));
-  }, 850 + Math.floor(Math.random()*650));
+  room.botTimer = setTimeout(async () => {
+    try {
+      // Re-check current state when the timer fires.
+      if (!room || room.phase !== "playing") return;
+      const stillCurrent = room.players.find(p => p.id === room.currentPlayerId);
+      if (!stillCurrent?.isBot) return;
+
+      await performBotTurn(room);
+    } catch (err) {
+      console.error("Bot turn failed:", err);
+
+      // Do not leave a practice match permanently frozen if a bot action errors.
+      if (room?.phase === "playing") {
+        setTimeout(() => scheduleBotTurn(room), 500);
+      }
+    }
+  }, 700 + Math.floor(Math.random()*500));
 }
 
 function startBotPractice(room) {
@@ -985,6 +1001,7 @@ io.on("connection", socket => {
     socket.data.roomCode=code; socket.join(code);
     socket.emit("joined",{roomCode:code,playerId:player.id,resumed:true});
     emitState(room);
+    if (room.matchType === "practice") scheduleBotTurn(room);
   });
 
   socket.on("quickPlay", async ({mode}) => {
@@ -1150,7 +1167,19 @@ socket.on("createRoom", async () => {
   });
 
   socket.on("leaveRoom",()=>{
-    const room=rooms.get(socket.data.roomCode); if(!room||room.phase==="playing") return;
+    const room=rooms.get(socket.data.roomCode);
+    if(!room) return;
+    if(room.phase==="playing" && room.matchType!=="practice") return;
+
+    if(room.matchType==="practice"){
+      clearTimeout(room.botTimer);
+      userActiveRoom.delete(user.id);
+      socket.leave(room.code);
+      socket.data.roomCode=null;
+      rooms.delete(room.code);
+      socket.emit("leftRoom");
+      return;
+    }
     const idx=room.players.findIndex(p=>p.userId===user.id); if(idx<0) return;
     const wasHost=room.players[idx].id===room.hostPlayerId;
     room.players.splice(idx,1); userActiveRoom.delete(user.id); socket.leave(room.code); socket.data.roomCode=null;
@@ -1167,7 +1196,13 @@ socket.on("createRoom", async () => {
     const code=userActiveRoom.get(user.id), room=code?rooms.get(code):null;
     if(!room) return;
     const p=room.players.find(x=>x.userId===user.id);
-    if(p){p.connected=false;p.socketId=null;room.lastEvent=`${p.name} disconnected`;emitState(room);}
+    if(p){
+      p.connected=false;
+      p.socketId=null;
+      if (room.matchType !== "practice") room.lastEvent=`${p.name} disconnected`;
+      emitState(room);
+      if (room.matchType === "practice") scheduleBotTurn(room);
+    }
   });
 });
 
