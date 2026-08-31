@@ -1,7 +1,7 @@
 const $=id=>document.getElementById(id);
 const SUITS=["diamond","heart","club","spade"];
 const SYMBOL={diamond:"♦",heart:"♥",club:"♣",spade:"♠"};
-let authMode="login", me=null, socket=null, roomState=null, privateState=null, myPlayerId=null, actionMode="play";
+let authMode="login", me=null, socket=null, roomState=null, privateState=null, myPlayerId=null, actionMode="play", queueState=null;
 
 function toast(m){$("toast").textContent=m;$("toast").classList.remove("hidden");setTimeout(()=>$("toast").classList.add("hidden"),2400)}
 function esc(s){return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
@@ -41,6 +41,8 @@ function connectSocket(){
   socket.on("roomState",s=>{roomState=s;renderPlay()});
   socket.on("privateState",s=>{privateState=s;renderPlay()});
   socket.on("leftRoom",()=>{roomState=null;privateState=null;myPlayerId=null;renderPlay()});
+  socket.on("queueStatus",q=>{queueState=q;renderPlay()});
+  socket.on("queueCancelled",()=>{queueState=null;renderPlay()});
   socket.on("noActiveRoom",()=>{});
   socket.on("errorMessage",toast);
   socket.on("connect_error",()=>toast("Session expired. Please login again."));
@@ -58,6 +60,13 @@ function getMyPlayer(){return roomState?.players?.find(p=>p.id===myPlayerId)}
 function renderPlay(){
   const inRoom=!!roomState;
   $("homeCard").classList.toggle("hidden",inRoom);
+  if(!inRoom){
+    $("queuePanel").classList.toggle("hidden",!queueState);
+    if(queueState){
+      $("queueTitle").textContent=queueState.mode==="ranked"?"Searching Ranked...":"Searching Casual...";
+      $("queueInfo").textContent=`Queue: ${queueState.waiting} player(s) waiting. Ranked search range expands automatically over time.`;
+    }
+  }
   $("lobbyScreen").classList.add("hidden");$("gameScreen").classList.add("hidden");$("resultScreen").classList.add("hidden");
   if(!inRoom)return;
   if(roomState.phase==="lobby"){ $("lobbyScreen").classList.remove("hidden"); renderLobby(); }
@@ -77,7 +86,7 @@ function playable(card){
 function cardEl(card,small=false){const e=document.createElement("div");e.className=`card ${["diamond","heart"].includes(card.suit)?"red":""} ${small?"small":""}`;e.innerHTML=`<div class="rank">${card.rank}${SYMBOL[card.suit]}</div><div class="suit-symbol">${SYMBOL[card.suit]}</div><div class="rank bottom">${card.rank}${SYMBOL[card.suit]}</div>`;return e}
 function renderGame(){
   const mine=getMyPlayer(), current=roomState.players.find(p=>p.id===roomState.currentPlayerId), myTurn=roomState.currentPlayerId===myPlayerId;
-  $("youName").textContent=mine?.name||me.username;$("turnText").textContent=current?`${current.name}'s turn`:"";$("lastEvent").textContent=roomState.lastEvent||"";
+  $("youName").textContent=mine?.name||me.username;$("matchTypeBadge").textContent=(roomState.matchType||"casual").toUpperCase();$("turnText").textContent=current?`${current.name}'s turn`:"";$("lastEvent").textContent=roomState.lastEvent||"";
   $("actionHelp").textContent=!myTurn?"Wait for your turn.":actionMode==="play"?"Play a highlighted card, or switch to Discard.":"Discard mode: choose any card. It stays hidden.";
   $("scoreRow").innerHTML=roomState.players.map(p=>`<div class="score-card ${p.id===roomState.currentPlayerId?"current":""} ${p.id===myPlayerId?"me":""}"><div class="score-name">${esc(p.name)}</div><div class="score-meta">${p.handCount} cards · ${p.score} discard pts</div></div>`).join("");
   const board=$("board");board.innerHTML="";
@@ -85,7 +94,7 @@ function renderGame(){
   const hand=$("hand");hand.innerHTML="";for(const c of privateState?.hand||[]){const e=cardEl(c);const can=playable(c);e.classList.add("clickable");if(!myTurn||actionMode==="play"&&!can)e.classList.add("disabled");if(myTurn&&actionMode==="play"&&can)e.classList.add("playable");e.onclick=()=>{if(!myTurn)return;if(actionMode==="play"){if(!can)return toast("That card cannot be played.");socket.emit("playCard",{cardId:c.id})}else socket.emit("discardCard",{cardId:c.id})};hand.appendChild(e)}
 }
 function renderResults(){
-  $("ranking").innerHTML=(roomState.rankings||[]).map(r=>`<div class="result-row"><div class="result-rank">#${r.rank}</div><div><strong>${esc(r.name)}</strong><div class="muted">${r.score} discard pts</div></div><div>${r.ratingAfter??""} ${r.tier??""}</div><div class="delta ${(r.ratingDelta||0)>=0?"plus":"minus"}">${(r.ratingDelta||0)>=0?"+":""}${r.ratingDelta??0}</div></div>`).join("");
+  $("ranking").innerHTML=(roomState.rankings||[]).map(r=>`<div class="result-row"><div class="result-rank">#${r.rank}</div><div><strong>${esc(r.name)}</strong><div class="muted">${r.score} discard pts · +${r.coinReward||0} Coins</div></div><div>${r.ratingAfter??""} ${r.tier??""}</div><div class="delta ${(r.ratingDelta||0)>=0?"plus":"minus"}">${roomState.matchType==="ranked"?`${(r.ratingDelta||0)>=0?"+":""}${r.ratingDelta??0}`:"Casual"}</div></div>`).join("");
   $("restartBtn").classList.toggle("hidden",!getMyPlayer()?.isHost);
 }
 
@@ -96,12 +105,15 @@ async function loadCollection(){try{await refreshMe();$("collectionWallet").inne
 async function openLootbox(currency){try{const d=await api('/api/shop/lootbox',{method:'POST',body:JSON.stringify({currency})});me=d.user;renderProfileBits();$("lootResult").classList.remove('hidden');$("lootResult").innerHTML=`<div class="eyebrow">${d.cosmetic.rarity} DROP</div><h3>${esc(d.cosmetic.name)}</h3><p>${d.duplicate?`Duplicate converted to <strong>${d.shardsGained} shards</strong>.`:'Added to Collection.'}</p>`;loadShop()}catch(e){toast(e.message)}}
 
 async function loadLeaderboard(){try{const d=await api("/api/leaderboard");$("leaderboard").innerHTML=d.leaderboard.map(r=>`<div class="leader-row"><div class="result-rank">#${r.rank}</div><div><strong>${esc(r.username)}</strong><div class="muted">${r.tier}</div></div><div>${r.rating} rating</div><div>${r.wins} wins</div></div>`).join("")||"<p class='muted'>No ranked players yet.</p>"}catch(e){toast(e.message)}}
-async function loadHistory(){try{const d=await api("/api/history");$("history").innerHTML=d.history.map(h=>`<div class="history-card"><div class="history-head"><div><strong>Rank #${h.finalRank}</strong> · ${h.discardScore} pts<div class="muted">${new Date(h.playedAt).toLocaleString()}</div></div><div class="delta ${h.ratingDelta>=0?"plus":"minus"}">${h.ratingDelta>=0?"+":""}${h.ratingDelta} rating</div></div><div class="history-players">${h.participants.map(p=>`<div class="history-player"><strong>#${p.finalRank} ${esc(p.username)}</strong><br>${p.discardScore} pts<br><span class="delta ${p.ratingDelta>=0?"plus":"minus"}">${p.ratingDelta>=0?"+":""}${p.ratingDelta}</span></div>`).join("")}</div></div>`).join("")||"<p class='muted'>No matches yet.</p>"}catch(e){toast(e.message)}}
+async function loadHistory(){try{const d=await api("/api/history");$("history").innerHTML=d.history.map(h=>`<div class="history-card"><div class="history-head"><div><strong>Rank #${h.finalRank}</strong><span class="history-type ${h.matchType}">${(h.matchType||"ranked").toUpperCase()}</span> · ${h.discardScore} pts<div class="muted">${new Date(h.playedAt).toLocaleString()}</div></div><div class="delta ${h.ratingDelta>=0?"plus":"minus"}">${h.matchType==="ranked"?`${h.ratingDelta>=0?"+":""}${h.ratingDelta} rating`:"No rating change"}</div></div><div class="history-players">${h.participants.map(p=>`<div class="history-player"><strong>#${p.finalRank} ${esc(p.username)}</strong><br>${p.discardScore} pts<br><span class="delta ${p.ratingDelta>=0?"plus":"minus"}">${p.ratingDelta>=0?"+":""}${p.ratingDelta}</span></div>`).join("")}</div></div>`).join("")||"<p class='muted'>No matches yet.</p>"}catch(e){toast(e.message)}}
 
 $("loginTab").onclick=()=>setAuthMode("login");$("registerTab").onclick=()=>setAuthMode("register");$("authBtn").onclick=authenticate;
 $("password").addEventListener("keydown",e=>{if(e.key==="Enter")authenticate()});
 document.querySelectorAll(".nav-btn[data-view]").forEach(b=>b.onclick=()=>showView(b.dataset.view));
 $("logoutBtn").onclick=async()=>{await api("/api/logout",{method:"POST"});location.reload()};
+$("casualQuickBtn").onclick=()=>{queueState={mode:"casual",waiting:1};renderPlay();socket.emit("quickPlay",{mode:"casual"})};
+$("rankedQuickBtn").onclick=()=>{queueState={mode:"ranked",waiting:1};renderPlay();socket.emit("quickPlay",{mode:"ranked"})};
+$("cancelQueueBtn").onclick=()=>socket.emit("cancelQueue");
 $("createBtn").onclick=()=>socket.emit("createRoom");$("joinBtn").onclick=()=>{const roomCode=$("roomInput").value.trim().toUpperCase();if(!roomCode)return toast("Enter a room code.");socket.emit("joinRoom",{roomCode})};
 $("readyBtn").onclick=()=>socket.emit("toggleReady");$("startBtn").onclick=()=>socket.emit("startMatch");$("restartBtn").onclick=()=>socket.emit("restartRoom");$("leaveRoomBtn").onclick=()=>socket.emit("leaveRoom");
 $("copyCodeBtn").onclick=async()=>{try{await navigator.clipboard.writeText(roomState.roomCode);toast("Room code copied.")}catch{toast(roomState.roomCode)}};

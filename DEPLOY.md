@@ -1,5 +1,12 @@
-# Seven v3 deployment
+# Deploy Seven v4
 
-Keep the same Railway app and Postgres service. Keep DATABASE_URL, JWT_SECRET, and NODE_ENV=production on seven-online. Replace the GitHub repo files with this package and deploy the latest commit. Database economy columns/tables are created automatically. Existing v2 accounts and match history are preserved.
+This is an in-place upgrade from the current Seven build.
 
-Test balances: 5000 Coins, 250 Gems. Seven Pack costs 2000 Coins or 40 Gems. Drop rates: Common 55%, Rare 27%, Epic 12%, Legendary 5%, Mythic 1%.
+1. Replace the files in your existing GitHub repository with this build.
+2. Commit to your connected Railway branch.
+3. Railway can autodeploy the commit.
+4. Keep the existing Postgres service and environment variables. No new Railway service is needed.
+
+The database migration is automatic. It only adds `matches.match_type` if missing.
+
+Quick Play queues are currently held in server memory, which is fine while the app runs as one Railway instance. If you later scale to multiple server replicas, move matchmaking/room state to Redis.

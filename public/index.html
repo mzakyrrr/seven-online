@@ -55,18 +55,39 @@
             <div class="stat-mini"><strong id="homeWins"></strong><span>Wins</span></div>
             <div class="stat-mini"><strong id="homePodiums"></strong><span>Podiums</span></div><div class="stat-mini currency"><strong id="homeCoins"></strong><span>Coins</span></div><div class="stat-mini currency"><strong id="homeGems"></strong><span>Gems</span></div><div class="stat-mini currency"><strong id="homeShards"></strong><span>Shards</span></div>
           </div>
-          <div class="play-actions">
-            <button id="createBtn" class="btn primary">Create Room</button>
-            <div class="join-box">
-              <input id="roomInput" maxlength="5" placeholder="ROOM">
-              <button id="joinBtn" class="btn secondary">Join Room</button>
+          <div class="matchmaking-grid">
+            <div class="mode-card casual-mode">
+              <div class="eyebrow">QUICK PLAY</div>
+              <h3>Casual</h3>
+              <p class="muted">Fast matchmaking. No rating change. Smaller Coin rewards.</p>
+              <button id="casualQuickBtn" class="btn secondary">Find Casual Match</button>
+            </div>
+            <div class="mode-card ranked-mode">
+              <div class="eyebrow">QUICK PLAY</div>
+              <h3>Ranked</h3>
+              <p class="muted">Matchmaking uses rating. Elo and leaderboard are affected.</p>
+              <button id="rankedQuickBtn" class="btn primary">Find Ranked Match</button>
+            </div>
+          </div>
+          <div id="queuePanel" class="queue-panel hidden">
+            <div><div class="eyebrow">MATCHMAKING</div><h3 id="queueTitle">Searching...</h3><p id="queueInfo" class="muted"></p></div>
+            <button id="cancelQueueBtn" class="btn ghost">Cancel</button>
+          </div>
+          <div class="private-room-block">
+            <div><div class="eyebrow">PLAY WITH FRIENDS</div><h3>Private Casual Room</h3></div>
+            <div class="play-actions">
+              <button id="createBtn" class="btn secondary">Create Private Room</button>
+              <div class="join-box">
+                <input id="roomInput" maxlength="5" placeholder="ROOM">
+                <button id="joinBtn" class="btn secondary">Join Room</button>
+              </div>
             </div>
           </div>
         </div>
 
         <section id="lobbyScreen" class="panel hidden">
           <div class="section-head">
-            <div><div class="eyebrow">LOBBY</div><h2>Room <span id="lobbyCode"></span></h2></div>
+            <div><div class="eyebrow">PRIVATE CASUAL LOBBY</div><h2>Room <span id="lobbyCode"></span></h2></div>
             <div class="section-actions">
               <button id="copyCodeBtn" class="btn secondary">Copy Code</button>
               <button id="leaveRoomBtn" class="btn ghost">Leave</button>
@@ -84,7 +105,7 @@
           <div id="scoreRow" class="score-row"></div>
           <div class="table">
             <div class="table-top">
-              <div id="turnText" class="turn-text"></div>
+              <div id="matchTypeBadge" class="match-type-badge"></div><div id="turnText" class="turn-text"></div>
               <div id="lastEvent" class="last-event"></div>
             </div>
             <div id="board" class="board"></div>

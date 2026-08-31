@@ -1,5 +1,14 @@
-# Seven Online v3 Economy
+# Seven Online v4 Matchmaking
 
-Adds Coins, Gems, Shards, rarity-based deck cosmetics, direct purchase, lootbox, Collection, equip deck, and Coin rewards after ranked matches.
+Adds to v3:
+- Casual Quick Play
+- Ranked Quick Play
+- Auto matchmaking and auto-start at 4 players
+- Cancel matchmaking queue
+- Ranked rating search expands over time
+- Private rooms remain Casual-only
+- Casual and Ranked labels in match history
+- Ranked changes Elo; Casual does not
+- Different Coin rewards by mode
 
-Real-money Gems purchase is intentionally not enabled yet.
+Economy, Shop, Collection, login, leaderboard and core Seven gameplay are preserved.

@@ -40,6 +40,7 @@ const SEQUENCE = ["2","3","4","5","6","7","8","9","10","J","Q","K"];
 const ALL_RANKS = [...SEQUENCE, "A"];
 const rooms = new Map();
 const userActiveRoom = new Map();
+const quickQueues = { casual: [], ranked: [] };
 
 function tierForRating(rating) {
   if (rating < 800) return "Iron";
@@ -75,6 +76,8 @@ async function initDb() {
       room_code VARCHAR(8),
       played_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    ALTER TABLE matches ADD COLUMN IF NOT EXISTS match_type TEXT NOT NULL DEFAULT 'ranked';
 
     CREATE TABLE IF NOT EXISTS match_players (
       id BIGSERIAL PRIMARY KEY,
@@ -190,7 +193,7 @@ async function getUserById(id) {
 app.get("/health", async (req, res) => {
   try {
     await pool.query("SELECT 1");
-    res.json({ status: "ok", app: "seven-online-v2", database: "connected" });
+    res.json({ status: "ok", app: "seven-online-v4", database: "connected" });
   } catch {
     res.status(500).json({ status: "error", database: "disconnected" });
   }
@@ -298,6 +301,7 @@ app.get("/api/history", authMiddleware, async (req, res) => {
     SELECT
       m.id AS match_id,
       m.room_code,
+      m.match_type,
       m.played_at,
       mp.final_rank,
       mp.discard_score,
@@ -330,6 +334,7 @@ app.get("/api/history", authMiddleware, async (req, res) => {
     history: rows.map(r => ({
       matchId: String(r.match_id),
       roomCode: r.room_code,
+      matchType: r.match_type || 'ranked',
       playedAt: r.played_at,
       finalRank: r.final_rank,
       discardScore: r.discard_score,
@@ -395,6 +400,8 @@ function generateRoomCode() {
 function publicRoomState(room) {
   return {
     roomCode: room.code,
+    matchType: room.matchType || 'casual',
+    isPrivate: !!room.isPrivate,
     phase: room.phase,
     currentPlayerId: room.currentPlayerId,
     board: room.board,
@@ -514,14 +521,15 @@ async function persistMatch(room) {
   room.persisted = true;
 
   const rankings = calculateRanking(room.players);
-  const deltas = calculateEloDeltas(room.players, rankings);
+  const isRanked = room.matchType === "ranked";
+  const deltas = isRanked ? calculateEloDeltas(room.players, rankings) : Object.fromEntries(room.players.map(p => [p.userId, 0]));
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
     const matchRes = await client.query(
-      `INSERT INTO matches(room_code) VALUES($1) RETURNING id`,
-      [room.code]
+      `INSERT INTO matches(room_code, match_type) VALUES($1,$2) RETURNING id`,
+      [room.code, room.matchType || "casual"]
     );
     const matchId = matchRes.rows[0].id;
 
@@ -538,20 +546,28 @@ async function persistMatch(room) {
         [matchId,p.userId,r.rank,r.score,before,after,delta]
       );
 
-      const coinReward=r.rank===1?80:r.rank===2?55:r.rank===3?35:20;
+      const rankedRewards = {1:80,2:55,3:35,4:20};
+      const casualRewards = {1:40,2:25,3:15,4:10};
+      const coinReward = (isRanked ? rankedRewards : casualRewards)[r.rank] || 10;
+
       await client.query(
         `UPDATE users
          SET rating=$1, games_played=games_played+1, wins=wins+$2, podiums=podiums+$3, coins=coins+$4
          WHERE id=$5`,
         [after,r.rank===1?1:0,r.rank<=3?1:0,coinReward,p.userId]
       );
-      await client.query(`INSERT INTO economy_transactions(user_id,kind,currency,amount,metadata) VALUES($1,'match_reward','coins',$2,$3::jsonb)`,[p.userId,coinReward,JSON.stringify({matchId:String(matchId),finalRank:r.rank})]);
-      r.coinReward=coinReward;
+      await client.query(
+        `INSERT INTO economy_transactions(user_id,kind,currency,amount,metadata)
+         VALUES($1,'match_reward','coins',$2,$3::jsonb)`,
+        [p.userId,coinReward,JSON.stringify({matchId:String(matchId),finalRank:r.rank,matchType:room.matchType})]
+      );
 
+      r.coinReward = coinReward;
       r.ratingBefore = before;
       r.ratingAfter = after;
       r.ratingDelta = delta;
       r.tier = tierForRating(after);
+      r.matchType = room.matchType;
     }
 
     await client.query("COMMIT");
@@ -617,6 +633,91 @@ function parseCookieHeader(header="") {
   return out;
 }
 
+
+function removeFromQueues(userId) {
+  for (const mode of ["casual","ranked"]) {
+    quickQueues[mode] = quickQueues[mode].filter(e => e.userId !== userId);
+  }
+}
+function queueStatusFor(userId) {
+  for (const mode of ["casual","ranked"]) {
+    const idx = quickQueues[mode].findIndex(e => e.userId === userId);
+    if (idx >= 0) return { mode, position: idx + 1, waiting: quickQueues[mode].length };
+  }
+  return null;
+}
+function rankedRange(waitMs) {
+  if (waitMs < 15000) return 150;
+  if (waitMs < 30000) return 300;
+  return Infinity;
+}
+function emitQueueStatuses(mode) {
+  quickQueues[mode].forEach((entry, idx) => {
+    io.to(entry.socketId).emit("queueStatus", { mode, position: idx + 1, waiting: quickQueues[mode].length });
+  });
+}
+function canFormRankedGroup(group) {
+  const oldest = Math.min(...group.map(x=>x.joinedAt));
+  const range = rankedRange(Date.now() - oldest);
+  if (!Number.isFinite(range)) return true;
+  const ratings = group.map(x=>x.rating);
+  return Math.max(...ratings) - Math.min(...ratings) <= range * 2;
+}
+async function createQuickMatch(entries, mode) {
+  const code = generateRoomCode();
+  const players = [];
+  for (const entry of entries) {
+    const sock = io.sockets.sockets.get(entry.socketId);
+    if (!sock || !sock.connected) continue;
+    const freshUser = await getUserById(entry.userId);
+    if (!freshUser) continue;
+    const player = makePlayer(freshUser, sock);
+    players.push(player);
+    userActiveRoom.set(freshUser.id, code);
+    sock.data.roomCode = code;
+    sock.join(code);
+    sock.emit("joined", { roomCode:code, playerId:player.id, quick:true, matchType:mode });
+  }
+  if (players.length !== 4) {
+    for (const p of players) userActiveRoom.delete(p.userId);
+    return false;
+  }
+  const room = {
+    code, phase:"lobby", hostPlayerId:players[0].id, players, currentPlayerId:null,
+    board:createBoard(), discardedCardIds:new Set(), rankings:null, persisted:false,
+    matchType:mode, isPrivate:false, lastEvent:`${mode === "ranked" ? "Ranked" : "Casual"} match found`
+  };
+  rooms.set(code, room);
+  await startMatch(room);
+  room.lastEvent = `${mode === "ranked" ? "Ranked" : "Casual"} match started`;
+  emitState(room);
+  return true;
+}
+async function tryMatchQueue(mode) {
+  const queue = quickQueues[mode];
+  for (let i=0; i<=queue.length-4; i++) {
+    for (let j=i+1; j<=queue.length-3; j++) {
+      for (let k=j+1; k<=queue.length-2; k++) {
+        for (let l=k+1; l<=queue.length-1; l++) {
+          const group=[queue[i],queue[j],queue[k],queue[l]];
+          if (mode === "ranked" && !canFormRankedGroup(group)) continue;
+          const ids = new Set(group.map(x=>x.userId));
+          quickQueues[mode] = quickQueues[mode].filter(x=>!ids.has(x.userId));
+          const ok = await createQuickMatch(group, mode);
+          emitQueueStatuses(mode);
+          return ok;
+        }
+      }
+    }
+  }
+  emitQueueStatuses(mode);
+  return false;
+}
+setInterval(() => {
+  tryMatchQueue("ranked").catch(console.error);
+  tryMatchQueue("casual").catch(console.error);
+}, 3000);
+
 io.use(async (socket, next) => {
   try {
     const cookies = parseCookieHeader(socket.handshake.headers.cookie || "");
@@ -637,7 +738,11 @@ io.on("connection", socket => {
   socket.on("resumeRoom", () => {
     const code = userActiveRoom.get(user.id);
     const room = code ? rooms.get(code) : null;
-    if (!room) return socket.emit("noActiveRoom");
+    if (!room) {
+      const q = queueStatusFor(user.id);
+      if (q) return socket.emit("queueStatus", q);
+      return socket.emit("noActiveRoom");
+    }
 
     const player = room.players.find(p=>p.userId===user.id);
     if (!player) return socket.emit("noActiveRoom");
@@ -648,14 +753,38 @@ io.on("connection", socket => {
     emitState(room);
   });
 
+  socket.on("quickPlay", async ({mode}) => {
+    try {
+      mode = String(mode || "").toLowerCase();
+      if (!["casual","ranked"].includes(mode)) return socket.emit("errorMessage","Invalid matchmaking mode.");
+      if (userActiveRoom.has(user.id)) return socket.emit("errorMessage","You already have an active room.");
+      removeFromQueues(user.id);
+      quickQueues[mode].push({ userId:user.id, socketId:socket.id, joinedAt:Date.now(), rating:user.rating });
+      socket.emit("queueStatus", { mode, position:quickQueues[mode].length, waiting:quickQueues[mode].length });
+      await tryMatchQueue(mode);
+    } catch (err) {
+      console.error(err);
+      socket.emit("errorMessage","Could not enter matchmaking.");
+    }
+  });
+
+  socket.on("cancelQueue", () => {
+    removeFromQueues(user.id);
+    socket.emit("queueCancelled");
+    emitQueueStatuses("casual");
+    emitQueueStatuses("ranked");
+  });
+
   socket.on("createRoom", () => {
+    if (queueStatusFor(user.id)) return socket.emit("errorMessage","Cancel matchmaking first.");
     if (userActiveRoom.has(user.id)) return socket.emit("errorMessage","You already have an active room.");
     const code=generateRoomCode();
     const player=makePlayer(user,socket);
     const room={
       code,phase:"lobby",hostPlayerId:player.id,players:[player],currentPlayerId:null,
       board:createBoard(),discardedCardIds:new Set(),rankings:null,persisted:false,
-      lastEvent:`${player.name} created the room`
+      matchType:"casual",isPrivate:true,
+      lastEvent:`${player.name} created a private casual room`
     };
     rooms.set(code,room); userActiveRoom.set(user.id,code);
     socket.data.roomCode=code; socket.join(code);
@@ -664,10 +793,12 @@ io.on("connection", socket => {
   });
 
   socket.on("joinRoom", ({roomCode}) => {
+    if (queueStatusFor(user.id)) return socket.emit("errorMessage","Cancel matchmaking first.");
     const code=String(roomCode||"").trim().toUpperCase();
     const room=rooms.get(code);
     if(!room) return socket.emit("errorMessage","Room not found.");
     if(room.phase!=="lobby") return socket.emit("errorMessage","Game already started.");
+    if(!room.isPrivate) return socket.emit("errorMessage","Quick Play rooms cannot be joined by code.");
     if(room.players.length>=4) return socket.emit("errorMessage","Room is full.");
     if(userActiveRoom.has(user.id)) return socket.emit("errorMessage","You already have an active room.");
     if(room.players.some(p=>p.userId===user.id)) return socket.emit("errorMessage","You are already in this room.");
@@ -693,6 +824,7 @@ io.on("connection", socket => {
       if(!p||p.id!==room.hostPlayerId) return socket.emit("errorMessage","Only host can start.");
       if(room.players.length!==4) return socket.emit("errorMessage","Exactly 4 players required.");
       if(!room.players.every(x=>x.ready&&x.connected)) return socket.emit("errorMessage","All 4 connected players must be ready.");
+      room.matchType="casual";
       await startMatch(room); emitState(room);
     } catch(err){ console.error(err); socket.emit("errorMessage","Could not start match."); }
   });
@@ -730,7 +862,7 @@ io.on("connection", socket => {
   socket.on("restartRoom",()=>{
     const room=rooms.get(socket.data.roomCode); if(!room) return;
     const p=room.players.find(x=>x.userId===user.id);
-    if(!p||p.id!==room.hostPlayerId) return;
+    if(!p||p.id!==room.hostPlayerId || !room.isPrivate) return;
     resetGameData(room); emitState(room);
   });
 
@@ -748,6 +880,7 @@ io.on("connection", socket => {
   });
 
   socket.on("disconnect",()=>{
+    removeFromQueues(user.id);
     const code=userActiveRoom.get(user.id), room=code?rooms.get(code):null;
     if(!room) return;
     const p=room.players.find(x=>x.userId===user.id);
@@ -756,5 +889,5 @@ io.on("connection", socket => {
 });
 
 initDb()
-  .then(()=>server.listen(PORT,()=>console.log(`Seven v2 running on port ${PORT}`)))
+  .then(()=>server.listen(PORT,()=>console.log(`Seven v4 running on port ${PORT}`)))
   .catch(err=>{console.error("Database init failed:",err);process.exit(1);});
