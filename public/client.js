@@ -122,7 +122,12 @@ function closeDiscardConfirmation(){pendingDiscardCard=null;$("discardModal").cl
 function renderGame(){
   const mine=getMyPlayer(), current=roomState.players.find(p=>p.id===roomState.currentPlayerId), myTurn=roomState.currentPlayerId===myPlayerId;
   $("youName").textContent=mine?.name||me.username;$("matchTypeBadge").textContent=(roomState.matchType||"casual").toUpperCase();$("turnText").textContent=current?`${current.name}'s turn`:"";$("lastEvent").textContent=roomState.lastEvent||"";
+  const matchType=(roomState.matchType||roomState.mode||"casual").toUpperCase();
+  $("gameModeBadge").textContent=matchType;
+  $("gameModeBadge").style.background=matchType==="RANKED"?"#c84c4c":"#e8d39a";
+  $("gameModeBadge").style.color=matchType==="RANKED"?"#fff":"#17140e";
   $("actionHelp").textContent=!myTurn?"Wait for your turn.":actionMode==="play"?"Play a highlighted card, or switch to Discard.":"DISCARD MODE: choose a card, then confirm before it is discarded.";
+  if($("privateDiscardInfo")) $("privateDiscardInfo").textContent=`Your discard: ${privateState?.discardedCount||0} card(s) · private value ${privateState?.discardedScore||privateState?.score||0} pts`;
   $("privateDiscardScore").innerHTML=`Your discard: <strong>${privateState?.discardedCount||0} card(s)</strong> · private value <strong>${privateState?.discardScore||0} pts</strong>`;
   document.querySelector(".hand-panel")?.classList.toggle("discard-active",actionMode==="discard");
   $("scoreRow").innerHTML=roomState.players.map(p=>`<div class="score-card ${p.id===roomState.currentPlayerId?"current":""} ${p.id===myPlayerId?"me":""}"><div class="score-name">${esc(p.name)}</div><div class="score-meta">${p.handCount} cards left · ${p.discardCount||0} discarded</div></div>`).join("");

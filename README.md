@@ -18,3 +18,14 @@ No new database service or environment variable is required. Deploy over the exi
 After a match ends:
 - **Back to Lobby** keeps the same private room for a rematch (host flow).
 - **Back to Play Menu** leaves the finished room and returns the player to the Play screen for Quick Play or another room.
+
+
+## UI Refresh
+This build includes an in-game visual refresh:
+- premium dark casino style
+- clearer current-turn HUD
+- stronger Play/Discard distinction
+- refined table and suit lanes
+- cleaner player status cards
+- improved hand readability
+- mobile responsiveness improvements
