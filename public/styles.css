@@ -339,3 +339,23 @@ body.game-focus-mode .shell{
 .forfeit-btn:hover{background:#562020;color:#fff}
 .temporary-bot{border-color:#6f6a42 !important}
 .temporary-bot::after{content:"BOT TAKEOVER" !important;color:#e8d67d !important}
+
+/* Public cosmetic visibility */
+.card .deck-mark{
+  position:absolute;
+  right:5px;
+  bottom:4px;
+  font-size:9px;
+  line-height:1;
+  font-weight:1000;
+  opacity:.9;
+}
+.card[data-deck="royal-gold"]{
+  box-shadow:0 0 0 1px rgba(216,173,74,.35),0 8px 24px rgba(216,173,74,.18),0 10px 20px rgba(0,0,0,.28) !important;
+}
+.card[data-deck="neon-tokyo"]{
+  box-shadow:0 0 0 1px rgba(255,79,216,.35),0 8px 24px rgba(102,246,255,.18),0 10px 20px rgba(0,0,0,.28) !important;
+}
+.card[data-deck="seven-void"]{
+  box-shadow:0 0 0 1px rgba(138,92,255,.42),0 8px 26px rgba(138,92,255,.20),0 10px 20px rgba(0,0,0,.3) !important;
+}

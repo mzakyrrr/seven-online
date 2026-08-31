@@ -110,11 +110,35 @@ function ensureRoomDeckStyles(state){
 function styleForSlug(slug){return deckStyles[slug||"classic"]||deckStyles.classic}
 function cardEl(card,small=false,deckSlug="classic"){
   const style=styleForSlug(deckSlug),e=document.createElement("div");
-  e.className=`card ${["diamond","heart"].includes(card.suit)?"red":""} ${small?"small":""}`;
-  e.style.background=style.card_face_bg||"#fffdf8";
-  e.style.borderColor=style.card_back_accent||"rgba(0,0,0,.13)";
-  if(!["diamond","heart"].includes(card.suit)) e.style.color=style.card_face_accent||"#181818";
-  e.innerHTML=`<div class="rank">${card.rank}${SYMBOL[card.suit]}</div><div class="suit-symbol">${SYMBOL[card.suit]}</div><div class="rank bottom">${card.rank}${SYMBOL[card.suit]}</div>`;
+  const isRed=["diamond","heart"].includes(card.suit);
+
+  e.className=`card ${isRed?"red":""} ${small?"small":""}`;
+  e.dataset.deck=deckSlug||"classic";
+
+  const face=style.card_face_bg||"#fffdf8";
+  const accent=style.card_back_accent||"#edd89a";
+  const back=style.card_back_bg||"#263c32";
+  const ink=style.card_face_accent||"#181818";
+
+  // Make every deck skin visibly recognizable even on the shared table.
+  e.style.background=`linear-gradient(155deg, ${face} 0%, ${face} 76%, ${back} 76%, ${back} 100%)`;
+  e.style.borderColor=accent;
+  e.style.borderWidth=small?"2px":"3px";
+  e.style.boxShadow=`0 0 0 1px ${accent}33, 0 9px 20px rgba(0,0,0,.28)`;
+
+  if(isRed){
+    // Keep red suits recognizable but tint them using the deck accent.
+    e.style.color=deckSlug==="classic"?"#d84e4e":accent;
+  }else{
+    e.style.color=ink;
+  }
+
+  e.innerHTML=`
+    <div class="rank">${card.rank}${SYMBOL[card.suit]}</div>
+    <div class="suit-symbol">${SYMBOL[card.suit]}</div>
+    <div class="deck-mark" style="color:${accent}">7</div>
+    <div class="rank bottom">${card.rank}${SYMBOL[card.suit]}</div>
+  `;
   return e
 }
 function renderChat(){
@@ -147,8 +171,17 @@ function renderGame(){
     if(!st.opened){line.innerHTML=`<div class="empty">${st.dead?"7 was discarded. Suit is dead.":"Waiting for 7"}</div>`}
     else{
       const played=(st.playedCards&&st.playedCards.length)?st.playedCards:st.playedRanks.map(rank=>({rank,deckSlug:"classic"}));
-      for(const pc of played) line.appendChild(cardEl({suit,rank:pc.rank},true,pc.deckSlug||"classic"));
-      if(st.acePlayed){const ac=st.aceCard||{rank:"A",deckSlug:"classic"};line.appendChild(cardEl({suit,rank:"A"},true,ac.deckSlug||"classic"))}
+      for(const pc of played){
+        const playedEl=cardEl({suit,rank:pc.rank},true,pc.deckSlug||"classic");
+        if(pc.playerName) playedEl.title=`Played by ${pc.playerName} · ${pc.deckSlug||"classic"}`;
+        line.appendChild(playedEl);
+      }
+      if(st.acePlayed){
+        const ac=st.aceCard||{rank:"A",deckSlug:"classic"};
+        const aceEl=cardEl({suit,rank:"A"},true,ac.deckSlug||"classic");
+        if(ac.playerName) aceEl.title=`Played by ${ac.playerName} · ${ac.deckSlug||"classic"}`;
+        line.appendChild(aceEl)
+      }
     }
     lane.appendChild(line);board.appendChild(lane)
   });

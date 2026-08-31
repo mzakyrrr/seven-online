@@ -437,7 +437,7 @@ function playOpeningSevenDiamond(room) {
   const idx = holder.hand.findIndex(c=>c.id==="diamond-7");
   holder.hand.splice(idx,1);
   const s = room.board.diamond;
-  s.opened=true; s.lowestIndex=5; s.highestIndex=5; s.playedRanks=["7"]; s.playedCards=[{rank:"7",playerId:holder.id,deckSlug:holder.deckSlug||"classic"}];
+  s.opened=true; s.lowestIndex=5; s.highestIndex=5; s.playedRanks=["7"]; s.playedCards=[{rank:"7",playerId:holder.id,playerName:holder.name,deckSlug:holder.deckSlug||"classic"}];
   const holderIndex = room.players.findIndex(p=>p.id===holder.id);
   room.currentPlayerId = room.players[(holderIndex+1)%4].id;
   room.lastEvent = `${holder.name} opened with 7♦`;
@@ -453,14 +453,14 @@ function isCardPlayable(card, board) {
 function updateBoardAfterPlay(room, card, player) {
   const s=room.board[card.suit], idx=SEQUENCE.indexOf(card.rank);
   if (!s.opened) {
-    s.opened=true; s.lowestIndex=idx; s.highestIndex=idx; s.playedRanks=[card.rank]; s.playedCards=[{rank:card.rank,playerId:player.id,deckSlug:player.deckSlug||"classic"}]; return;
+    s.opened=true; s.lowestIndex=idx; s.highestIndex=idx; s.playedRanks=[card.rank]; s.playedCards=[{rank:card.rank,playerId:player.id,playerName:player.name,deckSlug:player.deckSlug||"classic"}]; return;
   }
   if (idx===s.lowestIndex-1) s.lowestIndex=idx;
   if (idx===s.highestIndex+1) s.highestIndex=idx;
   if (!s.playedRanks.includes(card.rank)) {
     s.playedRanks.push(card.rank);
     s.playedRanks.sort((a,b)=>SEQUENCE.indexOf(a)-SEQUENCE.indexOf(b));
-    s.playedCards.push({rank:card.rank,playerId:player.id,deckSlug:player.deckSlug||"classic"});
+    s.playedCards.push({rank:card.rank,playerId:player.id,playerName:player.name,deckSlug:player.deckSlug||"classic"});
     s.playedCards.sort((a,b)=>SEQUENCE.indexOf(a.rank)-SEQUENCE.indexOf(b.rank));
   }
 }
@@ -482,7 +482,7 @@ function autoDiscardEntireSuit(room,suit){
   }
 }
 function closeSuit(room,suit,player){
-  const s=room.board[suit]; s.closed=true; s.acePlayed=true; s.aceCard={rank:"A",playerId:player.id,deckSlug:player.deckSlug||"classic"}; autoDiscardEntireSuit(room,suit);
+  const s=room.board[suit]; s.closed=true; s.acePlayed=true; s.aceCard={rank:"A",playerId:player.id,playerName:player.name,deckSlug:player.deckSlug||"classic"}; autoDiscardEntireSuit(room,suit);
 }
 function calculateRanking(players){
   const sorted=[...players].sort((a,b)=>a.score-b.score);
@@ -619,14 +619,23 @@ function resetGameData(room){
   room.players.forEach(p=>{p.hand=[];p.discardedCards=[];p.score=0;p.ready=false;});
 }
 async function startMatch(room){
-  const ids=room.players.map(p=>p.userId);
-  const {rows}=await pool.query(
-    `SELECT id,rating FROM users WHERE id = ANY($1::bigint[])`, [ids]
-  );
-  const ratings=Object.fromEntries(rows.map(r=>[String(r.id),r.rating]));
+  const ids=room.players.map(p=>p.userId).filter(Boolean);
+  const {rows}=ids.length ? await pool.query(
+    `SELECT id,rating,equipped_deck_slug FROM users WHERE id = ANY($1::bigint[])`, [ids]
+  ) : {rows:[]};
+
+  const usersById=Object.fromEntries(rows.map(r=>[String(r.id),r]));
+
   room.players.forEach(p=>{
     p.hand=[]; p.discardedCards=[]; p.score=0;
-    p.ratingAtStart=ratings[p.userId] ?? 1000;
+
+    if(p.userId && usersById[p.userId]){
+      p.ratingAtStart=usersById[p.userId].rating ?? 1000;
+      p.deckSlug=usersById[p.userId].equipped_deck_slug || "classic";
+    }else{
+      p.ratingAtStart=p.ratingAtStart ?? 1000;
+      p.deckSlug=p.deckSlug || "classic";
+    }
   });
   room.board=createBoard(); room.discardedCardIds=new Set(); room.rankings=null;
   room.persisted=false; room.phase="playing";
@@ -958,7 +967,13 @@ function scheduleBotTurn(room) {
   }, 700 + Math.floor(Math.random()*500));
 }
 
-function startBotPractice(room) {
+async function startBotPractice(room) {
+  const human = room.players.find(p=>!p.isBot && p.userId);
+  if(human){
+    const fresh = await getUserById(human.userId);
+    if(fresh) human.deckSlug = fresh.equipped_deck_slug || "classic";
+  }
+
   room.mode = "bot";
   room.matchType = "practice";
   room.phase = "playing";
@@ -1166,7 +1181,7 @@ io.on("connection", socket => {
   });
 
   
-  socket.on("playBots", () => {
+  socket.on("playBots", async () => {
     {
       const active = ensureNoBlockingActiveRoom(user.id);
       if (active.blocked) {
@@ -1177,7 +1192,8 @@ io.on("connection", socket => {
       }
     }
 
-    const human = makePlayer(user, socket);
+    const freshUser = await getUserById(user.id);
+    const human = makePlayer(freshUser || user, socket);
     const bots = [createBotPlayer(0), createBotPlayer(1), createBotPlayer(2)];
     const code = `BOT${Math.random().toString(36).slice(2,7).toUpperCase()}`;
 
@@ -1204,7 +1220,7 @@ io.on("connection", socket => {
     socket.data.roomCode = code;
     socket.join(code);
     socket.emit("joined", { roomCode: code, playerId: human.id });
-    startBotPractice(room);
+    await startBotPractice(room);
     emitState(room);
   });
 

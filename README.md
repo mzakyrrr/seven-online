@@ -57,3 +57,12 @@ This build includes an in-game visual refresh:
 - Removed stale `gameModeBadge` UI references from the old layout.
 - Added defensive UI rendering so missing optional elements do not break the whole match screen.
 - Play vs Bots now uses the same stale-room cleanup as other play modes.
+
+
+## v7.3 Public deck skins
+- Equipped deck is refreshed from PostgreSQL immediately before every match.
+- Practice mode also refreshes the human player's equipped deck.
+- Every card placed on the table permanently retains the skin of the player who played it.
+- Other players therefore see Royal Gold, Neon Tokyo, etc. on the shared table.
+- Cards played into the same suit can have different skins because ownership is stored per played card.
+- Skin visuals are now more obvious via face tint, accent border, lower color panel, glow, and deck mark.
