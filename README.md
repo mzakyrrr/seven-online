@@ -66,3 +66,11 @@ This build includes an in-game visual refresh:
 - Other players therefore see Royal Gold, Neon Tokyo, etc. on the shared table.
 - Cards played into the same suit can have different skins because ownership is stored per played card.
 - Skin visuals are now more obvious via face tint, accent border, lower color panel, glow, and deck mark.
+
+
+## v7.4 Cross-client deck skin sync
+- Deck color/style data is hydrated on the server before every match.
+- Full style data is embedded in public room state and each played card.
+- Other browsers no longer depend on their own cosmetic cache/API fetch to render another player's deck.
+- A Royal Gold card is therefore rendered identically on every connected client.
+- Bot and temporary-bot cards also preserve the seat's deck style.

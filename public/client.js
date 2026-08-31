@@ -108,8 +108,8 @@ function ensureRoomDeckStyles(state){
   for(const p of state?.players||[]) ensureDeckStyle(p.deckSlug||"classic");
 }
 function styleForSlug(slug){return deckStyles[slug||"classic"]||deckStyles.classic}
-function cardEl(card,small=false,deckSlug="classic"){
-  const style=styleForSlug(deckSlug),e=document.createElement("div");
+function cardEl(card,small=false,deckSlug="classic",deckStyleOverride=null){
+  const style=deckStyleOverride||styleForSlug(deckSlug),e=document.createElement("div");
   const isRed=["diamond","heart"].includes(card.suit);
 
   e.className=`card ${isRed?"red":""} ${small?"small":""}`;
@@ -150,7 +150,8 @@ function renderChat(){
 function openDiscardConfirmation(card){
   pendingDiscardCard=card;
   const preview=$("discardPreview");preview.innerHTML="";
-  preview.appendChild(cardEl(card,false,getMyPlayer()?.deckSlug||me?.equipped_deck_slug||"classic"));
+  const mine=getMyPlayer();
+  preview.appendChild(cardEl(card,false,mine?.deckSlug||me?.equipped_deck_slug||"classic",mine?.deckStyle||null));
   $("discardModal").classList.remove("hidden");
 }
 function closeDiscardConfirmation(){pendingDiscardCard=null;$("discardModal").classList.add("hidden")}
@@ -172,22 +173,22 @@ function renderGame(){
     else{
       const played=(st.playedCards&&st.playedCards.length)?st.playedCards:st.playedRanks.map(rank=>({rank,deckSlug:"classic"}));
       for(const pc of played){
-        const playedEl=cardEl({suit,rank:pc.rank},true,pc.deckSlug||"classic");
+        const playedEl=cardEl({suit,rank:pc.rank},true,pc.deckSlug||"classic",pc.deckStyle||null);
         if(pc.playerName) playedEl.title=`Played by ${pc.playerName} · ${pc.deckSlug||"classic"}`;
         line.appendChild(playedEl);
       }
       if(st.acePlayed){
         const ac=st.aceCard||{rank:"A",deckSlug:"classic"};
-        const aceEl=cardEl({suit,rank:"A"},true,ac.deckSlug||"classic");
+        const aceEl=cardEl({suit,rank:"A"},true,ac.deckSlug||"classic",ac.deckStyle||null);
         if(ac.playerName) aceEl.title=`Played by ${ac.playerName} · ${ac.deckSlug||"classic"}`;
         line.appendChild(aceEl)
       }
     }
     lane.appendChild(line);board.appendChild(lane)
   });
-  const hand=$("hand");hand.innerHTML="";const myDeck=mine?.deckSlug||me?.equipped_deck_slug||"classic";ensureDeckStyle(myDeck);
+  const hand=$("hand");hand.innerHTML="";const myDeck=mine?.deckSlug||me?.equipped_deck_slug||"classic";const myDeckStyle=mine?.deckStyle||null;ensureDeckStyle(myDeck);
   for(const c of privateState?.hand||[]){
-    const e=cardEl(c,false,myDeck),can=playable(c);e.classList.add("clickable");
+    const e=cardEl(c,false,myDeck,myDeckStyle),can=playable(c);e.classList.add("clickable");
     if(!myTurn||actionMode==="play"&&!can)e.classList.add("disabled");if(myTurn&&actionMode==="play"&&can)e.classList.add("playable");
     e.onclick=()=>{if(!myTurn)return;if(actionMode==="play"){if(!can)return toast("That card cannot be played.");socket.emit("playCard",{cardId:c.id})}else openDiscardConfirmation(c)};
     hand.appendChild(e)

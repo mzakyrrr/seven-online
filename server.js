@@ -356,6 +356,40 @@ app.post('/api/shop/buy',authMiddleware,async(req,res)=>{const slug=String(req.b
 app.post('/api/shop/lootbox',authMiddleware,async(req,res)=>{const currency=String(req.body.currency||'');if(!['coins','gems'].includes(currency))return res.status(400).json({error:'Invalid currency.'});const cost=currency==='coins'?2000:40,c=await pool.connect();try{await c.query('BEGIN');const u=(await c.query(`SELECT coins,gems FROM users WHERE id=$1 FOR UPDATE`,[req.auth.userId])).rows[0];if(u[currency]<cost)throw Object.assign(new Error(`Not enough ${currency}.`),{status:400});await c.query(`UPDATE users SET ${currency}=${currency}-$1 WHERE id=$2`,[cost,req.auth.userId]);const rarity=weightedRarity();let item=(await c.query(`SELECT * FROM cosmetics WHERE rarity=$1 AND is_active=true ORDER BY random() LIMIT 1`,[rarity])).rows[0];if(!item)item=(await c.query(`SELECT * FROM cosmetics WHERE is_active=true ORDER BY random() LIMIT 1`)).rows[0];const dup=(await c.query(`SELECT 1 FROM user_cosmetics WHERE user_id=$1 AND cosmetic_id=$2`,[req.auth.userId,item.id])).rowCount>0;let shardsGained=0;if(dup){shardsGained=item.shard_value;await c.query(`UPDATE users SET shards=shards+$1 WHERE id=$2`,[shardsGained,req.auth.userId])}else await c.query(`INSERT INTO user_cosmetics(user_id,cosmetic_id,obtained_via) VALUES($1,$2,$3)`,[req.auth.userId,item.id,`lootbox_${currency}`]);await c.query(`INSERT INTO economy_transactions(user_id,kind,currency,amount,cosmetic_id,metadata) VALUES($1,'lootbox',$2,$3,$4,$5::jsonb)`,[req.auth.userId,currency,-cost,item.id,JSON.stringify({rarity,duplicate:dup,shardsGained})]);await c.query('COMMIT');res.json({cosmetic:item,duplicate:dup,shardsGained,user:await getUserById(req.auth.userId)})}catch(e){await c.query('ROLLBACK');res.status(e.status||500).json({error:e.message||'Lootbox failed.'})}finally{c.release()}});
 app.post('/api/collection/equip',authMiddleware,async(req,res)=>{const slug=String(req.body.slug||'');if(!(await pool.query(`SELECT 1 FROM user_cosmetics uc JOIN cosmetics c ON c.id=uc.cosmetic_id WHERE uc.user_id=$1 AND c.slug=$2`,[req.auth.userId,slug])).rowCount)return res.status(403).json({error:'You do not own this deck.'});await pool.query(`UPDATE users SET equipped_deck_slug=$1 WHERE id=$2`,[slug,req.auth.userId]);res.json({ok:true,user:await getUserById(req.auth.userId)})});
 
+
+function deckStyleFromCosmeticRow(row) {
+  if (!row) return {
+    slug: "classic",
+    name: "Classic Seven",
+    card_back_bg: "#263c32",
+    card_back_accent: "#edd89a",
+    card_face_bg: "#fffdf8",
+    card_face_accent: "#181818"
+  };
+  return {
+    slug: row.slug,
+    name: row.name,
+    card_back_bg: row.card_back_bg,
+    card_back_accent: row.card_back_accent,
+    card_face_bg: row.card_face_bg,
+    card_face_accent: row.card_face_accent
+  };
+}
+
+async function hydrateRoomDeckStyles(room) {
+  const slugs = [...new Set(room.players.map(p => p.deckSlug || "classic"))];
+  const { rows } = await pool.query(`
+    SELECT slug,name,card_back_bg,card_back_accent,card_face_bg,card_face_accent
+    FROM cosmetics
+    WHERE slug = ANY($1::text[])
+  `, [slugs]);
+  const bySlug = Object.fromEntries(rows.map(r => [r.slug, deckStyleFromCosmeticRow(r)]));
+  const fallback = bySlug.classic || deckStyleFromCosmeticRow(null);
+  room.players.forEach(p => {
+    p.deckStyle = bySlug[p.deckSlug || "classic"] || fallback;
+  });
+}
+
 function getCardValue(rank) {
   if (rank === "A") return 11;
   if (["J","Q","K"].includes(rank)) return 10;
@@ -411,7 +445,8 @@ function publicRoomState(room) {
       isHost:p.id===room.hostPlayerId,
       isBot:!!p.isBot,
       isTemporaryBot:!!p.isTemporaryBot,
-      deckSlug:p.deckSlug||'classic'
+      deckSlug:p.deckSlug||'classic',
+      deckStyle:p.deckStyle||null
     })),
     rankings: room.rankings,
     lastEvent: room.lastEvent,
@@ -437,7 +472,7 @@ function playOpeningSevenDiamond(room) {
   const idx = holder.hand.findIndex(c=>c.id==="diamond-7");
   holder.hand.splice(idx,1);
   const s = room.board.diamond;
-  s.opened=true; s.lowestIndex=5; s.highestIndex=5; s.playedRanks=["7"]; s.playedCards=[{rank:"7",playerId:holder.id,playerName:holder.name,deckSlug:holder.deckSlug||"classic"}];
+  s.opened=true; s.lowestIndex=5; s.highestIndex=5; s.playedRanks=["7"]; s.playedCards=[{rank:"7",playerId:holder.id,playerName:holder.name,deckSlug:holder.deckSlug||"classic",deckStyle:holder.deckStyle||null}];
   const holderIndex = room.players.findIndex(p=>p.id===holder.id);
   room.currentPlayerId = room.players[(holderIndex+1)%4].id;
   room.lastEvent = `${holder.name} opened with 7♦`;
@@ -453,14 +488,14 @@ function isCardPlayable(card, board) {
 function updateBoardAfterPlay(room, card, player) {
   const s=room.board[card.suit], idx=SEQUENCE.indexOf(card.rank);
   if (!s.opened) {
-    s.opened=true; s.lowestIndex=idx; s.highestIndex=idx; s.playedRanks=[card.rank]; s.playedCards=[{rank:card.rank,playerId:player.id,playerName:player.name,deckSlug:player.deckSlug||"classic"}]; return;
+    s.opened=true; s.lowestIndex=idx; s.highestIndex=idx; s.playedRanks=[card.rank]; s.playedCards=[{rank:card.rank,playerId:player.id,playerName:player.name,deckSlug:player.deckSlug||"classic",deckStyle:player.deckStyle||null}]; return;
   }
   if (idx===s.lowestIndex-1) s.lowestIndex=idx;
   if (idx===s.highestIndex+1) s.highestIndex=idx;
   if (!s.playedRanks.includes(card.rank)) {
     s.playedRanks.push(card.rank);
     s.playedRanks.sort((a,b)=>SEQUENCE.indexOf(a)-SEQUENCE.indexOf(b));
-    s.playedCards.push({rank:card.rank,playerId:player.id,playerName:player.name,deckSlug:player.deckSlug||"classic"});
+    s.playedCards.push({rank:card.rank,playerId:player.id,playerName:player.name,deckSlug:player.deckSlug||"classic",deckStyle:player.deckStyle||null});
     s.playedCards.sort((a,b)=>SEQUENCE.indexOf(a.rank)-SEQUENCE.indexOf(b.rank));
   }
 }
@@ -482,7 +517,7 @@ function autoDiscardEntireSuit(room,suit){
   }
 }
 function closeSuit(room,suit,player){
-  const s=room.board[suit]; s.closed=true; s.acePlayed=true; s.aceCard={rank:"A",playerId:player.id,playerName:player.name,deckSlug:player.deckSlug||"classic"}; autoDiscardEntireSuit(room,suit);
+  const s=room.board[suit]; s.closed=true; s.acePlayed=true; s.aceCard={rank:"A",playerId:player.id,playerName:player.name,deckSlug:player.deckSlug||"classic",deckStyle:player.deckStyle||null}; autoDiscardEntireSuit(room,suit);
 }
 function calculateRanking(players){
   const sorted=[...players].sort((a,b)=>a.score-b.score);
@@ -637,6 +672,7 @@ async function startMatch(room){
       p.deckSlug=p.deckSlug || "classic";
     }
   });
+  await hydrateRoomDeckStyles(room);
   room.board=createBoard(); room.discardedCardIds=new Set(); room.rankings=null;
   room.persisted=false; room.phase="playing";
   dealCards(room); playOpeningSevenDiamond(room);
@@ -916,10 +952,10 @@ async function performBotTurn(room) {
 
   if (action.type === "play") {
     if (card.rank === "A") {
-      closeSuit(room, card.suit);
+      closeSuit(room, card.suit, bot);
       room.lastEvent = `${bot.name} closed ${card.suit}`;
     } else {
-      updateBoardAfterPlay(room, card);
+      updateBoardAfterPlay(room, card, bot);
       refreshBlockedPaths(room, card.suit);
       room.lastEvent = `${bot.name} played ${card.rank}${SUIT_SYMBOLS[card.suit]}`;
     }
@@ -974,6 +1010,7 @@ async function startBotPractice(room) {
     if(fresh) human.deckSlug = fresh.equipped_deck_slug || "classic";
   }
 
+  await hydrateRoomDeckStyles(room);
   room.mode = "bot";
   room.matchType = "practice";
   room.phase = "playing";
