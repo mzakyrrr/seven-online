@@ -546,8 +546,7 @@ async function persistMatch(room) {
       let after = Math.max(0, before + delta);
       const forfeited = pendingForfeitIds.has(String(p.userId));
       const forfeitRatingPenalty = forfeited && room.matchType === "ranked" ? 40 : 0;
-      const forfeitCoinPenalty = forfeited && room.matchType === "ranked" ? 100 :
-                                 forfeited && room.matchType !== "practice" ? 75 : 0;
+      const forfeitCoinPenalty = 0;
       after = Math.max(0, after - forfeitRatingPenalty);
 
       await client.query(
@@ -563,8 +562,8 @@ async function persistMatch(room) {
 
       await client.query(
         `UPDATE users
-         SET rating=$1, games_played=games_played+1, wins=wins+$2, podiums=podiums+$3, coins=GREATEST(0, coins+$4-$5)
-         WHERE id=$6`,
+         SET rating=$1, games_played=games_played+1, wins=wins+$2, podiums=podiums+$3, coins=coins+$4
+         WHERE id=$5`,
         [after,r.rank===1?1:0,r.rank<=3?1:0,coinReward,p.userId]
       );
       await client.query(

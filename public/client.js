@@ -225,10 +225,8 @@ if ($("forfeitBtn")) {
     if (!roomState || roomState.phase !== "playing") return;
     const type = (roomState.matchType || "casual").toLowerCase();
     const penalty = type === "ranked"
-      ? "If you stay away until the match ends: -40 rating and -100 Coins."
-      : type === "practice"
-      ? "Practice has no penalty."
-      : "If you stay away until the match ends: -75 Coins.";
+      ? "If you stay away until the match ends: -40 rating."
+      : "No rating penalty in Casual/Practice.";
 
     if (confirm(`Exit this match?\n\nA smart bot will immediately take over your exact seat and hand.\n\n${penalty}\n\nIf you reconnect before the match ends, you reclaim your seat and receive no penalty.`)) {
       socket.emit("forfeitMatch");
