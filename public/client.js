@@ -26,7 +26,7 @@ function enterApp(){
 }
 function renderProfileBits(){
   $("userTop").textContent=`${me.username} · ${me.rating} ${me.tier}`;
-  $("homeRating").textContent=me.rating;$("homeTier").textContent=me.tier;$("homeGames").textContent=me.games_played;$("homeWins").textContent=me.wins;$("homePodiums").textContent=me.podiums;
+  $("homeRating").textContent=me.rating;$("homeTier").textContent=me.tier;$("homeGames").textContent=me.games_played;$("homeWins").textContent=me.wins;$("homePodiums").textContent=me.podiums;$("homeCoins").textContent=(me.coins||0).toLocaleString();$("homeGems").textContent=(me.gems||0).toLocaleString();$("homeShards").textContent=(me.shards||0).toLocaleString();
   $("profileName").textContent=me.username;
   $("profileStats").innerHTML=[
     ["Rating",`${me.rating} · ${me.tier}`],["Games",me.games_played],["Wins",me.wins],["Podiums",me.podiums]
@@ -46,9 +46,11 @@ function connectSocket(){
   socket.on("connect_error",()=>toast("Session expired. Please login again."));
 }
 function showView(view){
-  ["play","leaderboard","history","profile"].forEach(v=>$(`${v}View`).classList.toggle("hidden",v!==view));
+  ["play","leaderboard","shop","collection","history","profile"].forEach(v=>$(`${v}View`).classList.toggle("hidden",v!==view));
   document.querySelectorAll(".nav-btn[data-view]").forEach(b=>b.classList.toggle("active",b.dataset.view===view));
   if(view==="leaderboard") loadLeaderboard();
+  if(view==="shop") loadShop();
+  if(view==="collection") loadCollection();
   if(view==="history") loadHistory();
   if(view==="profile") refreshMe();
 }
@@ -86,6 +88,7 @@ function renderResults(){
   $("ranking").innerHTML=(roomState.rankings||[]).map(r=>`<div class="result-row"><div class="result-rank">#${r.rank}</div><div><strong>${esc(r.name)}</strong><div class="muted">${r.score} discard pts</div></div><div>${r.ratingAfter??""} ${r.tier??""}</div><div class="delta ${(r.ratingDelta||0)>=0?"plus":"minus"}">${(r.ratingDelta||0)>=0?"+":""}${r.ratingDelta??0}</div></div>`).join("");
   $("restartBtn").classList.toggle("hidden",!getMyPlayer()?.isHost);
 }
+\nfunction walletHtml(){return `<span>Coins ${(me.coins||0).toLocaleString()}</span><span>Gems ${(me.gems||0).toLocaleString()}</span><span>Shards ${(me.shards||0).toLocaleString()}</span>`}\nfunction cosmeticPreview(c){return `<div class="cosmetic-preview" style="background:${c.card_back_bg}"><div class="cosmetic-preview-card" style="background:${c.card_face_bg};color:${c.card_face_accent};border:4px solid ${c.card_back_accent}">7</div></div>`}\nasync function loadShop(){try{await refreshMe();$("shopWallet").innerHTML=walletHtml();const d=await api('/api/shop');$("shopGrid").innerHTML=d.cosmetics.map(c=>`<div class="cosmetic-card">${cosmeticPreview(c)}<div class="cosmetic-title"><h3>${esc(c.name)}</h3><span class="rarity ${c.rarity}">${c.rarity}</span></div>${c.owned?'<div class="owned-badge">Owned</div>':`<div class="price-row"><button class="btn secondary buy-cosmetic" data-slug="${c.slug}" data-currency="coins">${Number(c.coin_price||0).toLocaleString()} Coins</button><button class="btn primary buy-cosmetic" data-slug="${c.slug}" data-currency="gems">${Number(c.gem_price||0).toLocaleString()} Gems</button></div>`}</div>`).join('');document.querySelectorAll('.buy-cosmetic').forEach(b=>b.onclick=async()=>{try{const d=await api('/api/shop/buy',{method:'POST',body:JSON.stringify({slug:b.dataset.slug,currency:b.dataset.currency})});me=d.user;renderProfileBits();toast(`Purchased ${d.cosmetic.name}`);loadShop()}catch(e){toast(e.message)}})}catch(e){toast(e.message)}}\nasync function loadCollection(){try{await refreshMe();$("collectionWallet").innerHTML=walletHtml();const d=await api('/api/collection');$("collectionGrid").innerHTML=d.collection.map(c=>`<div class="cosmetic-card">${cosmeticPreview(c)}<div class="cosmetic-title"><h3>${esc(c.name)}</h3><span class="rarity ${c.rarity}">${c.rarity}</span></div>${me.equipped_deck_slug===c.slug?'<div class="owned-badge">Equipped</div>':`<div class="price-row"><button class="btn primary equip-cosmetic" data-slug="${c.slug}">Equip Deck</button></div>`}</div>`).join('');document.querySelectorAll('.equip-cosmetic').forEach(b=>b.onclick=async()=>{try{const d=await api('/api/collection/equip',{method:'POST',body:JSON.stringify({slug:b.dataset.slug})});me=d.user;renderProfileBits();toast('Deck equipped');loadCollection()}catch(e){toast(e.message)}})}catch(e){toast(e.message)}}\nasync function openLootbox(currency){try{const d=await api('/api/shop/lootbox',{method:'POST',body:JSON.stringify({currency})});me=d.user;renderProfileBits();$("lootResult").classList.remove('hidden');$("lootResult").innerHTML=`<div class="eyebrow">${d.cosmetic.rarity} DROP</div><h3>${esc(d.cosmetic.name)}</h3><p>${d.duplicate?`Duplicate converted to <strong>${d.shardsGained} shards</strong>.`:'Added to Collection.'}</p>`;loadShop()}catch(e){toast(e.message)}}\n
 async function loadLeaderboard(){try{const d=await api("/api/leaderboard");$("leaderboard").innerHTML=d.leaderboard.map(r=>`<div class="leader-row"><div class="result-rank">#${r.rank}</div><div><strong>${esc(r.username)}</strong><div class="muted">${r.tier}</div></div><div>${r.rating} rating</div><div>${r.wins} wins</div></div>`).join("")||"<p class='muted'>No ranked players yet.</p>"}catch(e){toast(e.message)}}
 async function loadHistory(){try{const d=await api("/api/history");$("history").innerHTML=d.history.map(h=>`<div class="history-card"><div class="history-head"><div><strong>Rank #${h.finalRank}</strong> · ${h.discardScore} pts<div class="muted">${new Date(h.playedAt).toLocaleString()}</div></div><div class="delta ${h.ratingDelta>=0?"plus":"minus"}">${h.ratingDelta>=0?"+":""}${h.ratingDelta} rating</div></div><div class="history-players">${h.participants.map(p=>`<div class="history-player"><strong>#${p.finalRank} ${esc(p.username)}</strong><br>${p.discardScore} pts<br><span class="delta ${p.ratingDelta>=0?"plus":"minus"}">${p.ratingDelta>=0?"+":""}${p.ratingDelta}</span></div>`).join("")}</div></div>`).join("")||"<p class='muted'>No matches yet.</p>"}catch(e){toast(e.message)}}
 
@@ -98,4 +101,5 @@ $("readyBtn").onclick=()=>socket.emit("toggleReady");$("startBtn").onclick=()=>s
 $("copyCodeBtn").onclick=async()=>{try{await navigator.clipboard.writeText(roomState.roomCode);toast("Room code copied.")}catch{toast(roomState.roomCode)}};
 $("playModeBtn").onclick=()=>{actionMode="play";$("playModeBtn").classList.add("active");$("discardModeBtn").classList.remove("active");renderPlay()};
 $("discardModeBtn").onclick=()=>{actionMode="discard";$("discardModeBtn").classList.add("active");$("playModeBtn").classList.remove("active");renderPlay()};
+$("lootCoinsBtn").onclick=()=>openLootbox("coins");$("lootGemsBtn").onclick=()=>openLootbox("gems");
 checkSession();

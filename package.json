@@ -1,8 +1,8 @@
 {
-  "name": "seven-online-v2",
-  "version": "2.0.0",
+  "name": "seven-online-v3",
+  "version": "3.0.0",
   "private": true,
-  "description": "Seven Online with accounts, Elo ranking, leaderboard, and match history",
+  "description": "Seven Online v3 with ranked economy, cosmetics, shop, lootbox, and collection",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

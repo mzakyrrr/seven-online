@@ -65,6 +65,11 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS coins INTEGER NOT NULL DEFAULT 5000;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS gems INTEGER NOT NULL DEFAULT 250;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS shards INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS equipped_deck_slug TEXT NOT NULL DEFAULT 'classic';
+
     CREATE TABLE IF NOT EXISTS matches (
       id BIGSERIAL PRIMARY KEY,
       room_code VARCHAR(8),
@@ -83,8 +88,61 @@ async function initDb() {
       UNIQUE(match_id, user_id)
     );
 
+    CREATE TABLE IF NOT EXISTS cosmetics (
+      id BIGSERIAL PRIMARY KEY,
+      slug TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'deck',
+      rarity TEXT NOT NULL,
+      coin_price INTEGER,
+      gem_price INTEGER,
+      shard_value INTEGER NOT NULL DEFAULT 10,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      card_back_bg TEXT NOT NULL,
+      card_back_accent TEXT NOT NULL,
+      card_face_bg TEXT NOT NULL,
+      card_face_accent TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS user_cosmetics (
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      cosmetic_id BIGINT NOT NULL REFERENCES cosmetics(id) ON DELETE CASCADE,
+      obtained_via TEXT NOT NULL,
+      obtained_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(user_id, cosmetic_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS economy_transactions (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      currency TEXT,
+      amount INTEGER NOT NULL DEFAULT 0,
+      cosmetic_id BIGINT REFERENCES cosmetics(id) ON DELETE SET NULL,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_match_players_user_id ON match_players(user_id);
     CREATE INDEX IF NOT EXISTS idx_matches_played_at ON matches(played_at DESC);
+
+    INSERT INTO cosmetics
+      (slug,name,type,rarity,coin_price,gem_price,shard_value,card_back_bg,card_back_accent,card_face_bg,card_face_accent)
+    VALUES
+      ('classic','Classic Seven','deck','Common',0,0,5,'#263c32','#edd89a','#fffdf8','#181818'),
+      ('midnight','Midnight Black','deck','Common',2500,50,10,'#111111','#6f7cff','#f3f3f3','#111111'),
+      ('crimson','Crimson Club','deck','Rare',7500,120,25,'#2b0e13','#ff6378','#fff8f3','#a32035'),
+      ('royal-gold','Royal Gold','deck','Epic',18000,250,75,'#19130a','#d8ad4a','#fffaf0','#9b6d12'),
+      ('neon-tokyo','Neon Tokyo','deck','Legendary',40000,500,200,'#0b0712','#ff4fd8','#110f1c','#66f6ff'),
+      ('seven-void','Seven Void','deck','Mythic',80000,900,500,'#030307','#8a5cff','#080812','#d9c8ff')
+    ON CONFLICT (slug) DO NOTHING;
+
+    INSERT INTO user_cosmetics(user_id, cosmetic_id, obtained_via)
+    SELECT u.id, c.id, 'starter'
+    FROM users u CROSS JOIN cosmetics c
+    WHERE c.slug='classic'
+    ON CONFLICT DO NOTHING;
   `);
 }
 
@@ -117,7 +175,7 @@ function authMiddleware(req, res, next) {
 
 async function getUserById(id) {
   const { rows } = await pool.query(
-    `SELECT id, username, rating, games_played, wins, podiums, created_at
+    `SELECT id, username, rating, games_played, wins, podiums, coins, gems, shards, equipped_deck_slug, created_at
      FROM users WHERE id = $1`,
     [id]
   );
@@ -154,7 +212,7 @@ app.post("/api/register", async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO users(username, password_hash)
        VALUES($1, $2)
-       RETURNING id, username, rating, games_played, wins, podiums, created_at`,
+       RETURNING id, username, rating, games_played, wins, podiums, coins, gems, shards, equipped_deck_slug, created_at`,
       [username, hash]
     );
 
@@ -187,6 +245,10 @@ app.post("/api/login", async (req, res) => {
       games_played: userRow.games_played,
       wins: userRow.wins,
       podiums: userRow.podiums,
+      coins: userRow.coins,
+      gems: userRow.gems,
+      shards: userRow.shards,
+      equipped_deck_slug: userRow.equipped_deck_slug,
       created_at: userRow.created_at,
       tier: tierForRating(userRow.rating)
     };
@@ -279,6 +341,16 @@ app.get("/api/history", authMiddleware, async (req, res) => {
   });
 });
 
+
+const LOOT_WEIGHTS=[['Common',55],['Rare',27],['Epic',12],['Legendary',5],['Mythic',1]];
+function weightedRarity(){const x=Math.random()*100;let a=0;for(const [r,w] of LOOT_WEIGHTS){a+=w;if(x<a)return r}return 'Common'}
+
+app.get('/api/shop',authMiddleware,async(req,res)=>{const {rows}=await pool.query(`SELECT c.*, uc.user_id IS NOT NULL AS owned FROM cosmetics c LEFT JOIN user_cosmetics uc ON uc.cosmetic_id=c.id AND uc.user_id=$1 WHERE c.is_active=true ORDER BY CASE c.rarity WHEN 'Common' THEN 1 WHEN 'Rare' THEN 2 WHEN 'Epic' THEN 3 WHEN 'Legendary' THEN 4 WHEN 'Mythic' THEN 5 ELSE 6 END,c.id`,[req.auth.userId]);res.json({cosmetics:rows})});
+app.get('/api/collection',authMiddleware,async(req,res)=>{const {rows}=await pool.query(`SELECT c.*,uc.obtained_via,uc.obtained_at FROM user_cosmetics uc JOIN cosmetics c ON c.id=uc.cosmetic_id WHERE uc.user_id=$1 ORDER BY uc.obtained_at DESC`,[req.auth.userId]);res.json({collection:rows})});
+app.post('/api/shop/buy',authMiddleware,async(req,res)=>{const slug=String(req.body.slug||''),currency=String(req.body.currency||'');if(!['coins','gems'].includes(currency))return res.status(400).json({error:'Invalid currency.'});const c=await pool.connect();try{await c.query('BEGIN');const u=(await c.query(`SELECT coins,gems FROM users WHERE id=$1 FOR UPDATE`,[req.auth.userId])).rows[0];const item=(await c.query(`SELECT * FROM cosmetics WHERE slug=$1 AND is_active=true`,[slug])).rows[0];if(!item)throw Object.assign(new Error('Cosmetic not found.'),{status:404});if((await c.query(`SELECT 1 FROM user_cosmetics WHERE user_id=$1 AND cosmetic_id=$2`,[req.auth.userId,item.id])).rowCount)throw Object.assign(new Error('You already own this deck.'),{status:409});const price=currency==='coins'?item.coin_price:item.gem_price;if(u[currency]<price)throw Object.assign(new Error(`Not enough ${currency}.`),{status:400});await c.query(`UPDATE users SET ${currency}=${currency}-$1 WHERE id=$2`,[price,req.auth.userId]);await c.query(`INSERT INTO user_cosmetics(user_id,cosmetic_id,obtained_via) VALUES($1,$2,$3)`,[req.auth.userId,item.id,`direct_${currency}`]);await c.query(`INSERT INTO economy_transactions(user_id,kind,currency,amount,cosmetic_id) VALUES($1,'direct_purchase',$2,$3,$4)`,[req.auth.userId,currency,-price,item.id]);await c.query('COMMIT');res.json({ok:true,cosmetic:item,user:await getUserById(req.auth.userId)})}catch(e){await c.query('ROLLBACK');res.status(e.status||500).json({error:e.message||'Purchase failed.'})}finally{c.release()}});
+app.post('/api/shop/lootbox',authMiddleware,async(req,res)=>{const currency=String(req.body.currency||'');if(!['coins','gems'].includes(currency))return res.status(400).json({error:'Invalid currency.'});const cost=currency==='coins'?2000:40,c=await pool.connect();try{await c.query('BEGIN');const u=(await c.query(`SELECT coins,gems FROM users WHERE id=$1 FOR UPDATE`,[req.auth.userId])).rows[0];if(u[currency]<cost)throw Object.assign(new Error(`Not enough ${currency}.`),{status:400});await c.query(`UPDATE users SET ${currency}=${currency}-$1 WHERE id=$2`,[cost,req.auth.userId]);const rarity=weightedRarity();let item=(await c.query(`SELECT * FROM cosmetics WHERE rarity=$1 AND is_active=true ORDER BY random() LIMIT 1`,[rarity])).rows[0];if(!item)item=(await c.query(`SELECT * FROM cosmetics WHERE is_active=true ORDER BY random() LIMIT 1`)).rows[0];const dup=(await c.query(`SELECT 1 FROM user_cosmetics WHERE user_id=$1 AND cosmetic_id=$2`,[req.auth.userId,item.id])).rowCount>0;let shardsGained=0;if(dup){shardsGained=item.shard_value;await c.query(`UPDATE users SET shards=shards+$1 WHERE id=$2`,[shardsGained,req.auth.userId])}else await c.query(`INSERT INTO user_cosmetics(user_id,cosmetic_id,obtained_via) VALUES($1,$2,$3)`,[req.auth.userId,item.id,`lootbox_${currency}`]);await c.query(`INSERT INTO economy_transactions(user_id,kind,currency,amount,cosmetic_id,metadata) VALUES($1,'lootbox',$2,$3,$4,$5::jsonb)`,[req.auth.userId,currency,-cost,item.id,JSON.stringify({rarity,duplicate:dup,shardsGained})]);await c.query('COMMIT');res.json({cosmetic:item,duplicate:dup,shardsGained,user:await getUserById(req.auth.userId)})}catch(e){await c.query('ROLLBACK');res.status(e.status||500).json({error:e.message||'Lootbox failed.'})}finally{c.release()}});
+app.post('/api/collection/equip',authMiddleware,async(req,res)=>{const slug=String(req.body.slug||'');if(!(await pool.query(`SELECT 1 FROM user_cosmetics uc JOIN cosmetics c ON c.id=uc.cosmetic_id WHERE uc.user_id=$1 AND c.slug=$2`,[req.auth.userId,slug])).rowCount)return res.status(403).json({error:'You do not own this deck.'});await pool.query(`UPDATE users SET equipped_deck_slug=$1 WHERE id=$2`,[slug,req.auth.userId]);res.json({ok:true,user:await getUserById(req.auth.userId)})});
+
 function getCardValue(rank) {
   if (rank === "A") return 11;
   if (["J","Q","K"].includes(rank)) return 10;
@@ -329,7 +401,8 @@ function publicRoomState(room) {
     players: room.players.map(p => ({
       id:p.id, userId:p.userId, name:p.name, score:p.score,
       handCount:p.hand.length, ready:p.ready, connected:p.connected,
-      isHost:p.id===room.hostPlayerId
+      isHost:p.id===room.hostPlayerId,
+      deckSlug:p.deckSlug||'classic'
     })),
     rankings: room.rankings,
     lastEvent: room.lastEvent
@@ -465,15 +538,15 @@ async function persistMatch(room) {
         [matchId,p.userId,r.rank,r.score,before,after,delta]
       );
 
+      const coinReward=r.rank===1?80:r.rank===2?55:r.rank===3?35:20;
       await client.query(
         `UPDATE users
-         SET rating=$1,
-             games_played=games_played+1,
-             wins=wins+$2,
-             podiums=podiums+$3
-         WHERE id=$4`,
-        [after, r.rank===1 ? 1 : 0, r.rank<=3 ? 1 : 0, p.userId]
+         SET rating=$1, games_played=games_played+1, wins=wins+$2, podiums=podiums+$3, coins=coins+$4
+         WHERE id=$5`,
+        [after,r.rank===1?1:0,r.rank<=3?1:0,coinReward,p.userId]
       );
+      await client.query(`INSERT INTO economy_transactions(user_id,kind,currency,amount,metadata) VALUES($1,'match_reward','coins',$2,$3::jsonb)`,[p.userId,coinReward,JSON.stringify({matchId:String(matchId),finalRank:r.rank})]);
+      r.coinReward=coinReward;
 
       r.ratingBefore = before;
       r.ratingAfter = after;
@@ -531,7 +604,7 @@ async function startMatch(room){
 function makePlayer(user,socket){
   return {
     id:`p_${user.id}`, userId:String(user.id), socketId:socket.id, name:user.username,
-    hand:[],discardedCards:[],score:0,ready:false,connected:true,ratingAtStart:user.rating
+    hand:[],discardedCards:[],score:0,ready:false,connected:true,ratingAtStart:user.rating,deckSlug:user.equipped_deck_slug||'classic'
   };
 }
 
