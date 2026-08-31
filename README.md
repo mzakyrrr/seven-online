@@ -29,3 +29,16 @@ This build includes an in-game visual refresh:
 - cleaner player status cards
 - improved hand readability
 - mobile responsiveness improvements
+
+
+## Smart Bot Practice
+- Play one human vs three server-side bots.
+- Practice mode only, no Elo/rating changes and no ranked farming.
+- Bots use heuristics instead of random actions:
+  - evaluate whether to play or discard
+  - may intentionally block a suit path
+  - value control of future continuation cards
+  - consider self-damage before discarding an unopened 7
+  - prefer preserving useful Aces
+  - choose Ace closures based on remaining cards in their own hand
+- Bots do not need access to opponents' private hands to choose an action.

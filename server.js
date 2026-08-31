@@ -409,6 +409,7 @@ function publicRoomState(room) {
       id:p.id, userId:p.userId, name:p.name, discardCount:p.discardedCards.length,
       handCount:p.hand.length, ready:p.ready, connected:p.connected,
       isHost:p.id===room.hostPlayerId,
+      isBot:!!p.isBot,
       deckSlug:p.deckSlug||'classic'
     })),
     rankings: room.rankings,
@@ -588,7 +589,7 @@ async function finishIfNeeded(room){
     room.phase="finished"; room.currentPlayerId=null;
     room.rankings=calculateRanking(room.players);
     room.lastEvent="Game finished";
-    await persistMatch(room);
+    if (room.matchType !== "practice") await persistMatch(room);
     return true;
   }
   return false;
@@ -721,6 +722,236 @@ setInterval(() => {
   tryMatchQueue("casual").catch(console.error);
 }, 3000);
 
+
+const BOT_NAMES = ["Nova", "Mika", "Orion", "Rin", "Atlas", "Kiro", "Luna", "Vale"];
+
+function createBotPlayer(index) {
+  return {
+    id: `bot_${Date.now()}_${index}_${Math.random().toString(36).slice(2,6)}`,
+    userId: null,
+    socketId: null,
+    name: BOT_NAMES[(index + Math.floor(Math.random()*BOT_NAMES.length)) % BOT_NAMES.length],
+    hand: [],
+    discardedCards: [],
+    score: 0,
+    ready: true,
+    connected: true,
+    ratingAtStart: 1000,
+    deckSlug: ["classic","midnight","crimson","royal-gold","neon-tokyo"][index % 5],
+    isBot: true
+  };
+}
+
+function botOwnSuitStats(bot, suit) {
+  const cards = bot.hand.filter(c => c.suit === suit);
+  return {
+    count: cards.length,
+    totalValue: cards.reduce((s,c)=>s+c.value,0),
+    ranks: new Set(cards.map(c=>c.rank))
+  };
+}
+
+function frontierInfo(room, suit) {
+  const s = room.board[suit];
+  if (!s.opened || s.closed || s.dead) return null;
+  return {
+    lowerRank: (!s.lowerBlocked && s.lowestIndex > 0) ? SEQUENCE[s.lowestIndex - 1] : null,
+    upperRank: (!s.upperBlocked && s.highestIndex < 11) ? SEQUENCE[s.highestIndex + 1] : null
+  };
+}
+
+function scorePlayableForBot(room, bot, card) {
+  const s = room.board[card.suit];
+  const own = botOwnSuitStats(bot, card.suit);
+
+  // Ace: closing is good if bot has few remaining cards of that suit.
+  if (card.rank === "A") {
+    const ownRemainingPenalty = own.totalValue - 11;
+    return 55 - ownRemainingPenalty * 1.5;
+  }
+
+  // Opening a suit with 7 is better if bot controls adjacent continuation cards.
+  if (!s.opened && card.rank === "7") {
+    let score = 22;
+    if (own.ranks.has("6")) score += 10;
+    if (own.ranks.has("8")) score += 10;
+    if (own.ranks.has("5")) score += 4;
+    if (own.ranks.has("9")) score += 4;
+    score -= Math.max(0, own.count - 5) * 1.5;
+    return score;
+  }
+
+  const idx = SEQUENCE.indexOf(card.rank);
+  let score = 18;
+
+  // Reward a play that lets bot continue the same chain itself.
+  if (idx === s.lowestIndex - 1) {
+    const next = idx - 1 >= 0 ? SEQUENCE[idx - 1] : null;
+    if (next && own.ranks.has(next)) score += 13;
+    if (!next) score += 8; // reaching 2 enables Ace
+  }
+  if (idx === s.highestIndex + 1) {
+    const next = idx + 1 <= 11 ? SEQUENCE[idx + 1] : null;
+    if (next && own.ranks.has(next)) score += 13;
+    if (!next) score += 8; // reaching K enables Ace
+  }
+
+  // Prefer unloading higher value cards, but only moderately.
+  score += card.value * 0.65;
+
+  // If playing this card would expose a frontier bot doesn't control, be a little cautious.
+  const lowerNext = idx - 1 >= 0 ? SEQUENCE[idx - 1] : null;
+  const upperNext = idx + 1 <= 11 ? SEQUENCE[idx + 1] : null;
+  if (idx === s.lowestIndex - 1 && lowerNext && !own.ranks.has(lowerNext)) score -= 5;
+  if (idx === s.highestIndex + 1 && upperNext && !own.ranks.has(upperNext)) score -= 5;
+
+  return score;
+}
+
+function scoreDiscardForBot(room, bot, card) {
+  const s = room.board[card.suit];
+  const own = botOwnSuitStats(bot, card.suit);
+
+  // Base: discarding costs points, so low-value cards are preferred.
+  let score = 18 - card.value * 1.25;
+
+  // Ace is usually valuable. Avoid discarding it unless its suit is effectively dead/closed.
+  if (card.rank === "A") {
+    if (s.closed || s.dead) score += 8;
+    else score -= 18;
+  }
+
+  // Killing an unopened suit with 7 can be strategic, but is awful if bot holds many cards there.
+  if (card.rank === "7" && !s.opened) {
+    const selfDamage = own.totalValue - 7;
+    score += 26 - selfDamage * 1.6;
+  }
+
+  // Strategic connector discard: if this card is exactly a current frontier, it blocks that path.
+  const frontier = frontierInfo(room, card.suit);
+  if (frontier) {
+    if (card.rank === frontier.lowerRank || card.rank === frontier.upperRank) {
+      // Reward blocking more if bot does not own many follow-up cards behind that path.
+      score += 26;
+
+      const idx = SEQUENCE.indexOf(card.rank);
+      if (card.rank === frontier.lowerRank) {
+        const behind = bot.hand.filter(c => c.suit===card.suit && SEQUENCE.indexOf(c.rank) < idx);
+        score -= behind.reduce((s,c)=>s+c.value,0) * 0.9;
+      } else {
+        const behind = bot.hand.filter(c => c.suit===card.suit && SEQUENCE.indexOf(c.rank) > idx && c.rank !== "A");
+        score -= behind.reduce((s,c)=>s+c.value,0) * 0.9;
+      }
+    }
+  }
+
+  // Discarding a card from already closed/dead suit is unavoidable, so don't overthink it.
+  if (s.closed || s.dead) score += 12;
+
+  return score;
+}
+
+function chooseBotAction(room, bot) {
+  const options = [];
+
+  for (const card of bot.hand) {
+    if (isCardPlayable(card, room.board)) {
+      options.push({
+        type: "play",
+        card,
+        score: scorePlayableForBot(room, bot, card)
+      });
+    }
+
+    options.push({
+      type: "discard",
+      card,
+      score: scoreDiscardForBot(room, bot, card)
+    });
+  }
+
+  // Small noise prevents perfectly deterministic behavior.
+  for (const o of options) {
+    o.score += (Math.random() - 0.5) * 4;
+  }
+
+  options.sort((a,b)=>b.score-a.score);
+  return options[0];
+}
+
+async function performBotTurn(room) {
+  if (!room || room.phase !== "playing") return;
+  const bot = room.players.find(p => p.id === room.currentPlayerId);
+  if (!bot || !bot.isBot) return;
+
+  const action = chooseBotAction(room, bot);
+  if (!action) return;
+
+  const idx = bot.hand.findIndex(c => c.id === action.card.id);
+  if (idx < 0) return;
+
+  const card = bot.hand[idx];
+  bot.hand.splice(idx, 1);
+
+  if (action.type === "play") {
+    if (card.rank === "A") {
+      closeSuit(room, card.suit);
+      room.lastEvent = `${bot.name} closed ${card.suit}`;
+    } else {
+      updateBoardAfterPlay(room, card);
+      refreshBlockedPaths(room, card.suit);
+      room.lastEvent = `${bot.name} played ${card.rank}${SUIT_SYMBOLS[card.suit]}`;
+    }
+  } else {
+    discardToPlayer(room, bot, card);
+    const s = room.board[card.suit];
+    if (card.rank === "7" && !s.opened) {
+      s.dead = true;
+      autoDiscardEntireSuit(room, card.suit);
+    } else {
+      refreshBlockedPaths(room, card.suit);
+    }
+    room.lastEvent = `${bot.name} discarded a hidden card`;
+  }
+
+  await advanceTurn(room);
+  emitState(room);
+  scheduleBotTurn(room);
+}
+
+function scheduleBotTurn(room) {
+  if (!room || room.phase !== "playing") return;
+  const current = room.players.find(p => p.id === room.currentPlayerId);
+  if (!current?.isBot) return;
+
+  clearTimeout(room.botTimer);
+  room.botTimer = setTimeout(() => {
+    performBotTurn(room).catch(err => console.error("Bot turn failed:", err));
+  }, 850 + Math.floor(Math.random()*650));
+}
+
+function startBotPractice(room) {
+  room.mode = "bot";
+  room.matchType = "practice";
+  room.phase = "playing";
+  room.board = createBoard();
+  room.discardedCardIds = new Set();
+  room.rankings = null;
+  room.persisted = true; // practice games are not written to ranked/casual history
+  room.lastEvent = "Practice game started";
+
+  room.players.forEach(p => {
+    p.hand = [];
+    p.discardedCards = [];
+    p.score = 0;
+    p.ready = true;
+  });
+
+  dealCards(room);
+  playOpeningSevenDiamond(room);
+  scheduleBotTurn(room);
+}
+
 io.use(async (socket, next) => {
   try {
     const cookies = parseCookieHeader(socket.handshake.headers.cookie || "");
@@ -778,7 +1009,42 @@ io.on("connection", socket => {
     emitQueueStatuses("ranked");
   });
 
-  socket.on("createRoom", async () => {
+  
+  socket.on("playBots", () => {
+    if (userActiveRoom.has(user.id)) {
+      return socket.emit("errorMessage", "You already have an active room.");
+    }
+
+    const human = makePlayer(user, socket);
+    const bots = [createBotPlayer(0), createBotPlayer(1), createBotPlayer(2)];
+    const code = `BOT${Math.random().toString(36).slice(2,7).toUpperCase()}`;
+
+    const room = {
+      code,
+      phase: "lobby",
+      mode: "bot",
+      matchType: "practice",
+      hostPlayerId: human.id,
+      players: [human, ...bots],
+      currentPlayerId: null,
+      board: createBoard(),
+      discardedCardIds: new Set(),
+      rankings: null,
+      persisted: true,
+      lastEvent: "Preparing practice match",
+      botTimer: null
+    };
+
+    rooms.set(code, room);
+    userActiveRoom.set(user.id, code);
+    socket.data.roomCode = code;
+    socket.join(code);
+    socket.emit("joined", { roomCode: code, playerId: human.id });
+    startBotPractice(room);
+    emitState(room);
+  });
+
+socket.on("createRoom", async () => {
     if (queueStatusFor(user.id)) return socket.emit("errorMessage","Cancel matchmaking first.");
     if (userActiveRoom.has(user.id)) return socket.emit("errorMessage","You already have an active room.");
     const code=generateRoomCode();
@@ -857,7 +1123,7 @@ io.on("connection", socket => {
       p.hand.splice(idx,1);
       if(card.rank==="A"){ closeSuit(room,card.suit,p); room.lastEvent=`${p.name} closed ${card.suit}`; }
       else { updateBoardAfterPlay(room,card,p); refreshBlockedPaths(room,card.suit); room.lastEvent=`${p.name} played ${card.rank}${SUIT_SYMBOLS[card.suit]}`; }
-      await advanceTurn(room); emitState(room);
+      await advanceTurn(room); emitState(room); scheduleBotTurn(room);
     }catch(err){console.error(err); socket.emit("errorMessage","Action failed.");}
   });
 
@@ -872,7 +1138,7 @@ io.on("connection", socket => {
       if(card.rank==="7"&&!s.opened){s.dead=true;autoDiscardEntireSuit(room,card.suit);}
       else refreshBlockedPaths(room,card.suit);
       room.lastEvent=`${p.name} discarded a hidden card`;
-      await advanceTurn(room); emitState(room);
+      await advanceTurn(room); emitState(room); scheduleBotTurn(room);
     }catch(err){console.error(err); socket.emit("errorMessage","Action failed.");}
   });
 

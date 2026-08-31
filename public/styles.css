@@ -302,3 +302,21 @@ body{
   .table{border-radius:20px}
   .hand-panel{padding:16px}
 }
+
+
+.bot-btn{
+  background:linear-gradient(135deg,#3f5f9a,#6f87c4);
+  color:#fff;
+  border:1px solid #7891ce;
+}
+.bot-btn:hover{filter:brightness(1.08)}
+.score-card.bot-player::after{
+  content:"BOT";
+  position:absolute;
+  right:10px;
+  top:10px;
+  font-size:9px;
+  font-weight:950;
+  letter-spacing:.12em;
+  color:#a9bce8;
+}

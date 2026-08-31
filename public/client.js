@@ -124,13 +124,13 @@ function renderGame(){
   $("youName").textContent=mine?.name||me.username;$("matchTypeBadge").textContent=(roomState.matchType||"casual").toUpperCase();$("turnText").textContent=current?`${current.name}'s turn`:"";$("lastEvent").textContent=roomState.lastEvent||"";
   const matchType=(roomState.matchType||roomState.mode||"casual").toUpperCase();
   $("gameModeBadge").textContent=matchType;
-  $("gameModeBadge").style.background=matchType==="RANKED"?"#c84c4c":"#e8d39a";
+  $("gameModeBadge").style.background=matchType==="RANKED"?"#c84c4c":matchType==="PRACTICE"?"#7392d8":"#e8d39a";
   $("gameModeBadge").style.color=matchType==="RANKED"?"#fff":"#17140e";
   $("actionHelp").textContent=!myTurn?"Wait for your turn.":actionMode==="play"?"Play a highlighted card, or switch to Discard.":"DISCARD MODE: choose a card, then confirm before it is discarded.";
   if($("privateDiscardInfo")) $("privateDiscardInfo").textContent=`Your discard: ${privateState?.discardedCount||0} card(s) · private value ${privateState?.discardedScore||privateState?.score||0} pts`;
   $("privateDiscardScore").innerHTML=`Your discard: <strong>${privateState?.discardedCount||0} card(s)</strong> · private value <strong>${privateState?.discardScore||0} pts</strong>`;
   document.querySelector(".hand-panel")?.classList.toggle("discard-active",actionMode==="discard");
-  $("scoreRow").innerHTML=roomState.players.map(p=>`<div class="score-card ${p.id===roomState.currentPlayerId?"current":""} ${p.id===myPlayerId?"me":""}"><div class="score-name">${esc(p.name)}</div><div class="score-meta">${p.handCount} cards left · ${p.discardCount||0} discarded</div></div>`).join("");
+  $("scoreRow").innerHTML=roomState.players.map(p=>`<div class="score-card ${p.id===roomState.currentPlayerId?"current":""} ${p.id===myPlayerId?"me":""} ${p.isBot?"bot-player":""}"><div class="score-name">${esc(p.name)}</div><div class="score-meta">${p.handCount} cards left · ${p.discardCount||0} discarded</div></div>`).join("");
   const board=$("board");board.innerHTML="";
   SUITS.forEach(suit=>{
     const st=roomState.board[suit],lane=document.createElement("div");lane.className="suit-lane";const status=st.dead?"Dead":st.closed?"Closed":st.opened?"Open":"Waiting";
@@ -198,3 +198,7 @@ $("confirmDiscardBtn").onclick=()=>{if(!pendingDiscardCard)return;socket.emit("d
 $("discardModal").onclick=e=>{if(e.target===$("discardModal"))closeDiscardConfirmation()};
 $("chatForm").addEventListener("submit",e=>{e.preventDefault();const input=$("chatInput"),text=input.value.trim();if(!text||!socket)return;socket.emit("sendChat",{text});input.value=""});
 checkSession();
+
+if ($("botsBtn")) {
+  $("botsBtn").onclick = () => socket.emit("playBots");
+}
